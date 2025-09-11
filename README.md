@@ -2,9 +2,6 @@
 
 A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
 
-## 🚀 Live Demo
-
-Visit the live application: [https://smart-sanitation-man-dlpg.bolt.host](https://smart-sanitation-man-dlpg.bolt.host)
 
 ## 📋 Table of Contents
 
