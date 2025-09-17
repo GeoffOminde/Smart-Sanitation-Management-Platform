@@ -113,11 +113,12 @@ npm run preview
 npm run lint
 ```
 
+
 ### 🔑 Sample Admin Login Credentials
-
 Username / Email: Admin
-
 Password: Admin
+
+
 
 ### Environment Setup
 
@@ -283,12 +284,9 @@ For support and questions:
 - [ ] Integration with IoT sensors
 - [ ] Customer self-service portal
 
-### 🌱 How Your Platform Strengthens SDG Impact
-
+### 🌱 How the Platform Strengthens SDG Impact
 Directly: Provides reliable sanitation services (SDG 6, SDG 3).
-
 Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
-
 Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 
 ### Version History
