@@ -2,6 +2,9 @@
 
 A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
 
+## 🚀 Live Demo
+
+Visit the live application: (no hosted live demo configured)
 
 ## 📋 Table of Contents
 
@@ -41,7 +44,7 @@ A comprehensive fleet management dashboard for mobile toilet rental companies op
 - **Icons**: Lucide React
 - **State Management**: React Hooks (useState, useEffect)
 - **Development**: ESLint, TypeScript compiler
-- **Deployment**: Bolt Hosting (Netlify)
+- **Deployment**: Netlify / Vercel / static hosting
 
 ## 📁 Project Structure
 
@@ -215,7 +218,7 @@ npm run build
 ```
 
 ### Deployment Platforms
-- **Bolt Hosting** (Current): Automated deployment with Netlify
+- **Netlify / Bolt**: Automated deployment option
 - **Vercel**: Alternative deployment option
 - **AWS S3 + CloudFront**: Enterprise deployment option
 
@@ -285,3 +288,22 @@ For support and questions:
 ---
 
 **Built with ❤️ for the East African sanitation industry**
+
+## Payments backend (demo)
+
+A small Express demo server is included under `server/` to help test Paystack and M-Pesa integrations.
+
+Quick start:
+
+1. Copy `server/.env.example` to `server/.env` and fill your keys (do not commit this file).
+2. Install dependencies and run:
+
+   cd server; npm install; npm start
+
+3. The server listens on the port defined in `server/.env` (default 3000). It exposes endpoints:
+   - POST /api/paystack/init -> Initialize a Paystack transaction (server-side)
+   - GET /api/mpesa/token -> Get OAuth token from Safaricom sandbox/production
+   - POST /api/mpesa/stk -> Initiate STK Push (M-Pesa)
+
+Security:
+- Never commit secret keys to source control. Use environment variables or a secret manager.
