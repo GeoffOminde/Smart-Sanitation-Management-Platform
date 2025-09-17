@@ -2,9 +2,6 @@
 
 A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
 
-## 🚀 Live Demo
-
-Visit the live application: (no hosted live demo configured)
 
 ## 📋 Table of Contents
 
@@ -115,6 +112,12 @@ npm run preview
 # Run linting
 npm run lint
 ```
+
+### 🔑 Sample Admin Login Credentials
+
+Username / Email: Admin
+
+Password: Admin
 
 ### Environment Setup
 
@@ -279,6 +282,14 @@ For support and questions:
 - [ ] Offline mode capabilities
 - [ ] Integration with IoT sensors
 - [ ] Customer self-service portal
+
+### 🌱 How Your Platform Strengthens SDG Impact
+
+Directly: Provides reliable sanitation services (SDG 6, SDG 3).
+
+Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
+
+Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 
 ### Version History
 - **v1.0.0** - Initial release with core functionality
