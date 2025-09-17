@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   MapPin, 
   Truck, 
@@ -10,8 +10,6 @@ import {
   DollarSign,
   TrendingUp,
   Clock,
-  CheckCircle,
-  XCircle,
   Search,
   Filter,
   Plus,
@@ -23,12 +21,13 @@ import {
   Mail,
   Wrench,
   BarChart3,
-  Bell,
   CreditCard,
   MessageSquare,
   Shield,
   Globe
 } from 'lucide-react';
+import { Bell } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface Unit {
   id: string;
@@ -73,6 +72,26 @@ interface TeamMember {
 
 const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
+  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, []);
   const [searchTerm, setSearchTerm] = useState('');
 
   // Mock data
@@ -162,8 +181,17 @@ const Dashboard: React.FC = () => {
               <p className="text-sm font-medium text-gray-600">Today's Revenue</p>
               <p className="text-2xl font-bold text-gray-900">KSh 58,000</p>
             </div>
-            <div className="p-3 bg-yellow-100 rounded-full">
-              <DollarSign className="w-6 h-6 text-yellow-600" />
+            <div className="flex items-center space-x-3">
+              <div className="p-3 bg-yellow-100 rounded-full">
+                <DollarSign className="w-6 h-6 text-yellow-600" />
+              </div>
+              {/* Payments pending badge */}
+              {bookings.filter(b => b.paymentStatus === 'pending').length > 0 && (
+                <div className="inline-flex items-center px-3 py-1 bg-red-50 text-red-700 rounded-full text-sm font-medium">
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  {bookings.filter(b => b.paymentStatus === 'pending').length} Pending
+                </div>
+              )}
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">
@@ -199,7 +227,7 @@ const Dashboard: React.FC = () => {
               <p className="text-sm font-medium text-red-800">Unit ST-003 requires immediate servicing</p>
               <p className="text-xs text-red-600">Fill level: 92% | Location: Karen</p>
             </div>
-            <button className="text-red-600 hover:text-red-800 text-sm font-medium">
+            <button className="text-red-600 hover:text-red-800 text-sm font-medium" onClick={() => alert('Assign Route to technician for Unit ST-003')}>
               Assign Route
             </button>
           </div>
@@ -210,7 +238,7 @@ const Dashboard: React.FC = () => {
               <p className="text-sm font-medium text-yellow-800">Low battery alert for Unit ST-003</p>
               <p className="text-xs text-yellow-600">Battery level: 15% | Last seen: 1 hour ago</p>
             </div>
-            <button className="text-yellow-600 hover:text-yellow-800 text-sm font-medium">
+            <button className="text-yellow-600 hover:text-yellow-800 text-sm font-medium" onClick={() => alert('Schedule maintenance for Unit ST-003')}>
               Schedule Maintenance
             </button>
           </div>
@@ -263,11 +291,11 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Fleet Map</h3>
             <div className="flex items-center space-x-2">
-              <button className="px-3 py-2 text-sm border rounded-md hover:bg-gray-50">
+              <button className="px-3 py-2 text-sm border rounded-md hover:bg-gray-50" onClick={() => alert('Filter map view')}>
                 <Filter className="w-4 h-4 mr-1 inline" />
                 Filter
               </button>
-              <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">
+              <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Map refreshed!')}>
                 Refresh
               </button>
             </div>
@@ -315,7 +343,7 @@ const Dashboard: React.FC = () => {
         <div className="p-6 border-b">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Active Routes</h3>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Create new route')}>
               <Plus className="w-4 h-4 mr-2 inline" />
               Create Route
             </button>
@@ -357,13 +385,13 @@ const Dashboard: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button className="text-blue-600 hover:text-blue-900">
+                    <button className="text-blue-600 hover:text-blue-900" onClick={() => alert('View route details')}>
                       <Eye className="w-4 h-4" />
                     </button>
-                    <button className="text-green-600 hover:text-green-900">
+                    <button className="text-green-600 hover:text-green-900" onClick={() => alert('Edit route')}>
                       <Edit className="w-4 h-4" />
                     </button>
-                    <button className="text-red-600 hover:text-red-900">
+                    <button className="text-red-600 hover:text-red-900" onClick={() => alert('Delete route')}>
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
@@ -406,7 +434,7 @@ const Dashboard: React.FC = () => {
               </select>
             </div>
           </div>
-          <button className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+          <button className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" onClick={() => alert('Routes optimized!')}>
             <Navigation className="w-4 h-4 mr-2 inline" />
             Optimize Routes
           </button>
@@ -432,7 +460,7 @@ const Dashboard: React.FC = () => {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+              <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Create new booking')}>
                 <Plus className="w-4 h-4 mr-2 inline" />
                 New Booking
               </button>
@@ -472,13 +500,13 @@ const Dashboard: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button className="text-blue-600 hover:text-blue-900">
+                    <button className="text-blue-600 hover:text-blue-900" onClick={() => alert('View booking details')}>
                       <Eye className="w-4 h-4" />
                     </button>
-                    <button className="text-green-600 hover:text-green-900">
+                    <button className="text-green-600 hover:text-green-900" onClick={() => alert('Edit booking')}>
                       <Edit className="w-4 h-4" />
                     </button>
-                    <button className="text-red-600 hover:text-red-900">
+                    <button className="text-red-600 hover:text-red-900" onClick={() => alert('Delete booking')}>
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
@@ -497,28 +525,10 @@ const Dashboard: React.FC = () => {
         <div className="p-6 border-b">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Maintenance Schedule</h3>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Schedule new maintenance')}>
               <Plus className="w-4 h-4 mr-2 inline" />
               Schedule Maintenance
             </button>
-          </div>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-red-50 p-4 rounded-lg">
-              <h4 className="font-medium text-red-800 mb-2">Urgent (2)</h4>
-              <div className="space-y-2">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-003 - Pump Failure</p>
-                  <p className="text-xs text-gray-600">Karen | Due: Today</p>
-                </div>
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-007 - Battery Replace</p>
-                  <p className="text-xs text-gray-600">CBD | Due: Tomorrow</p>
-                </div>
-              </div>
-            </div>
-            
             <div className="bg-yellow-50 p-4 rounded-lg">
               <h4 className="font-medium text-yellow-800 mb-2">Scheduled (3)</h4>
               <div className="space-y-2">
@@ -791,7 +801,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-gray-500">Not configured</p>
               </div>
             </div>
-            <button className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-full hover:bg-blue-700">
+            <button className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-full hover:bg-blue-700" onClick={() => alert('Configure Google Maps API')}>
               Configure
             </button>
           </div>
@@ -916,7 +926,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-gray-500">Add an extra layer of security</p>
               </div>
             </div>
-            <button className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-full hover:bg-blue-700">
+            <button className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-full hover:bg-blue-700" onClick={() => alert('Enable Two-Factor Authentication')}>
               Enable
             </button>
           </div>
@@ -972,11 +982,33 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <button className="p-2 text-gray-400 hover:text-gray-600">
+              <button className="p-2 text-gray-400 hover:text-gray-600" onClick={() => navigate('/notifications')}>
                 <Bell className="w-5 h-5" />
               </button>
-              <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                <Users className="w-4 h-4 text-gray-600" />
+
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center"
+                  aria-expanded={menuOpen}
+                >
+                  <Users className="w-4 h-4 text-gray-600" />
+                </button>
+
+                <div className={`absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ${menuOpen ? 'block' : 'hidden'}`}>
+                  <button
+                    onClick={() => { setMenuOpen(false); navigate('/profile'); }}
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Profile
+                  </button>
+                  <button
+                    onClick={() => { setMenuOpen(false); navigate('/logout'); }}
+                    className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-gray-100"
+                  >
+                    Logout
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -993,6 +1025,7 @@ const Dashboard: React.FC = () => {
                   { id: 'overview', label: 'Overview', icon: BarChart3 },
                   { id: 'fleet', label: 'Fleet Map', icon: MapPin },
                   { id: 'routes', label: 'Routes', icon: Navigation },
+                  { id: 'payments', label: 'Payments', icon: CreditCard },
                   { id: 'bookings', label: 'Bookings', icon: Calendar },
                   { id: 'maintenance', label: 'Maintenance', icon: Wrench },
                   { id: 'analytics', label: 'Analytics', icon: TrendingUp },
