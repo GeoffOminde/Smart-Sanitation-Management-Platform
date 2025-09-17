@@ -294,9 +294,7 @@ Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 - **v1.1.0** - Enhanced mobile responsiveness
 - **v1.2.0** - Advanced analytics and reporting
 
----
 
-**Built with ❤️ for the East African sanitation industry**
 
 ## Payments backend (demo)
 
@@ -316,3 +314,7 @@ Quick start:
 
 Security:
 - Never commit secret keys to source control. Use environment variables or a secret manager.
+
+---
+
+**Built with ❤️ for the East African sanitation industry**
