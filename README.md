@@ -309,10 +309,12 @@ Quick start:
 
    cd server; npm install; npm start
 
-3. The server listens on the port defined in `server/.env` (default 3000). It exposes endpoints:
+3. The server listens on the port defined in `server/.env` (default 3001). It exposes endpoints:
    - POST /api/paystack/init -> Initialize a Paystack transaction (server-side)
    - GET /api/mpesa/token -> Get OAuth token from Safaricom sandbox/production
    - POST /api/mpesa/stk -> Initiate STK Push (M-Pesa)
+
+During development, the frontend proxies `/api/*` requests to `http://localhost:3001` via `vite.config.ts`.
 
 Security:
 - Never commit secret keys to source control. Use environment variables or a secret manager.

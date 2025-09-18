@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Bell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import PaymentsPage from '../Payments';
 
 interface Unit {
   id: string;
@@ -956,6 +957,7 @@ const Dashboard: React.FC = () => {
       case 'overview': return renderOverview();
       case 'fleet': return renderFleetMap();
       case 'routes': return renderRoutes();
+      case 'payments': return <PaymentsPage />;
       case 'bookings': return renderBookings();
       case 'maintenance': return renderMaintenance();
       case 'analytics': return renderAnalytics();
@@ -966,55 +968,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                  <Truck className="w-5 h-5 text-white" />
-                </div>
-              </div>
-              <div className="ml-3">
-                <h1 className="text-xl font-semibold text-gray-900">Smart Sanitation</h1>
-                <p className="text-sm text-gray-500">Fleet Management Platform</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button className="p-2 text-gray-400 hover:text-gray-600" onClick={() => navigate('/notifications')}>
-                <Bell className="w-5 h-5" />
-              </button>
-
-              <div className="relative" ref={menuRef}>
-                <button
-                  onClick={() => setMenuOpen((v) => !v)}
-                  className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center"
-                  aria-expanded={menuOpen}
-                >
-                  <Users className="w-4 h-4 text-gray-600" />
-                </button>
-
-                <div className={`absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 ${menuOpen ? 'block' : 'hidden'}`}>
-                  <button
-                    onClick={() => { setMenuOpen(false); navigate('/profile'); }}
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    Profile
-                  </button>
-                  <button
-                    onClick={() => { setMenuOpen(false); navigate('/logout'); }}
-                    className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-gray-100"
-                  >
-                    Logout
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
+      {/* Content area only: top navigation is provided by ProtectedLayout */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Sidebar */}

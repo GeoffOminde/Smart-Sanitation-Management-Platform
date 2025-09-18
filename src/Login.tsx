@@ -18,7 +18,9 @@ const Login = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === 'admin' && password === 'admin') {
+    const u = username.trim().toLowerCase();
+    const p = password.trim().toLowerCase();
+    if (u === 'admin' && p === 'admin') {
       login();
       // navigate immediately to ensure redirect
       navigate('/dashboard');

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from './lib/api';
 
 type Transaction = {
   id: number;
@@ -13,29 +14,47 @@ type Transaction = {
 const AdminTransactions = () => {
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchTx = async () => {
     setLoading(true);
-    const resp = await fetch('/api/admin/transactions');
-    const data = await resp.json();
-    setTxs(data.transactions || []);
-    setLoading(false);
+    setError(null);
+    try {
+      const resp = await apiFetch('/api/admin/transactions');
+      if (!resp.ok) throw new Error(`Failed to fetch: ${resp.status}`);
+      const data = await resp.json();
+      setTxs(Array.isArray(data.transactions) ? data.transactions : []);
+    } catch (e: any) {
+      console.error('[AdminTransactions] fetchTx failed', e);
+      setError('Failed to load transactions');
+      setTxs([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchTx(); }, []);
 
   const handleDelete = async (id: number) => {
-    await fetch(`/api/admin/transactions/${id}`, { method: 'DELETE' });
-    fetchTx();
+    try {
+      const resp = await apiFetch(`/api/admin/transactions/${id}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
+      fetchTx();
+    } catch (e) {
+      console.error('[AdminTransactions] delete failed', e);
+      alert('Failed to delete transaction');
+    }
   };
 
   const handleSeed = async () => {
     setLoading(true);
     try {
-      await fetch('/api/admin/seed', { method: 'POST' });
+      const resp = await apiFetch('/api/admin/seed', { method: 'POST' });
+      if (!resp.ok) throw new Error(`Seed failed: ${resp.status}`);
       await fetchTx();
     } catch (err) {
       console.error(err);
+      setError('Failed to seed demo transactions');
     } finally {
       setLoading(false);
     }
@@ -55,6 +74,9 @@ const AdminTransactions = () => {
           </button>
         </div>
       </div>
+      {error && (
+        <div className="mb-3 text-sm text-red-600">{error}</div>
+      )}
       {loading ? <p>Loading...</p> : (
         <div className="space-y-4">
           {txs.length === 0 && <p>No transactions yet.</p>}
