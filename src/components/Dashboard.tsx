@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { apiFetch } from '../lib/api';
 import { 
   MapPin, 
@@ -28,7 +28,6 @@ import {
   Globe
 } from 'lucide-react';
 import { Bell } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import PaymentsPage from '../Payments';
 import Insights from '../Insights';
 
@@ -75,27 +74,52 @@ interface TeamMember {
 
 const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
-  const navigate = useNavigate();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, []);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Smart Booking state
+  const [sbDate, setSbDate] = useState<string>('');
+  const [sbUnits, setSbUnits] = useState<number>(3);
+  const [sbLocation, setSbLocation] = useState<string>('Nairobi');
+  const [sbDuration, setSbDuration] = useState<number>(1);
+  const [sbCapacity, setSbCapacity] = useState<number>(80);
+  const [sbLoading, setSbLoading] = useState<boolean>(false);
+  const [sbError, setSbError] = useState<string | null>(null);
+  const [sbSuggestion, setSbSuggestion] = useState<any | null>(null);
+  const [sbAlternatives, setSbAlternatives] = useState<any[] | null>(null);
+
+  const smartSuggest = async () => {
+    setSbLoading(true);
+    setSbError(null);
+    setSbSuggestion(null);
+    setSbAlternatives(null);
+    try {
+      const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
+      const resp = await apiFetch('/api/ai/smart-booking/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: sbDate || undefined,
+          location: sbLocation,
+          units: sbUnits,
+          durationDays: sbDuration,
+          capacityPerDay: sbCapacity,
+          bookingsHistory: history,
+        })
+      });
+      if (!resp.ok) {
+        let detail = '';
+        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+        throw new Error(`Smart suggestion failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+      }
+      const data = await resp.json();
+      setSbSuggestion(data?.suggestion || null);
+      setSbAlternatives(data?.alternatives || null);
+    } catch (e: any) {
+      setSbError(e?.message || 'Failed to get suggestion');
+    } finally {
+      setSbLoading(false);
+    }
+  };
 
   // Prescriptive recommendation (demand forecast)
   const [recText, setRecText] = useState<string | null>(null);
@@ -371,278 +395,6 @@ const Dashboard: React.FC = () => {
             <div className="flex items-center">
               <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
               <span>Offline ({units.filter(u => u.status === 'offline').length})</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderRoutes = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900">Active Routes</h3>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Create new route')}>
-              <Plus className="w-4 h-4 mr-2 inline" />
-              Create Route
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Units</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Est. Time</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {routes.map((route) => (
-                <tr key={route.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center mr-3">
-                        <Users className="w-4 h-4 text-gray-600" />
-                      </div>
-                      <span className="text-sm font-medium text-gray-900">{route.technician}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{route.units}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(route.status)}`}>
-                      {route.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{route.estimatedTime}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(route.priority)}`}>
-                      {route.priority}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button className="text-blue-600 hover:text-blue-900" onClick={() => alert('View route details')}>
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button className="text-green-600 hover:text-green-900" onClick={() => alert('Edit route')}>
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="text-red-600 hover:text-red-900" onClick={() => alert('Delete route')}>
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Route Optimizer */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b">
-          <h3 className="text-lg font-semibold text-gray-900">Route Optimizer</h3>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Depot Location</label>
-              <select className="w-full border border-gray-300 rounded-md px-3 py-2">
-                <option>Westlands Depot</option>
-                <option>CBD Depot</option>
-                <option>Karen Depot</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
-              <select className="w-full border border-gray-300 rounded-md px-3 py-2">
-                <option>Fill Level Priority</option>
-                <option>Distance Priority</option>
-                <option>Customer Priority</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Time Window</label>
-              <select className="w-full border border-gray-300 rounded-md px-3 py-2">
-                <option>Morning (6AM - 12PM)</option>
-                <option>Afternoon (12PM - 6PM)</option>
-                <option>Full Day (6AM - 6PM)</option>
-              </select>
-            </div>
-          </div>
-          <button className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" onClick={() => alert('Routes optimized!')}>
-            <Navigation className="w-4 h-4 mr-2 inline" />
-            Optimize Routes
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderBookings = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900">Bookings Management</h3>
-            <div className="flex items-center space-x-2">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search bookings..."
-                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Create new booking')}>
-                <Plus className="w-4 h-4 mr-2 inline" />
-                New Booking
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {bookings.map((booking) => (
-                <tr key={booking.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{booking.customer}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.unit}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.date}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.duration}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">KSh {booking.amount.toLocaleString()}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>
-                      {booking.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.paymentStatus)}`}>
-                      {booking.paymentStatus}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button className="text-blue-600 hover:text-blue-900" onClick={() => alert('View booking details')}>
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button className="text-green-600 hover:text-green-900" onClick={() => alert('Edit booking')}>
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="text-red-600 hover:text-red-900" onClick={() => alert('Delete booking')}>
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderMaintenance = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900">Maintenance Schedule</h3>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Schedule new maintenance')}>
-              <Plus className="w-4 h-4 mr-2 inline" />
-              Schedule Maintenance
-            </button>
-            <div className="bg-yellow-50 p-4 rounded-lg">
-              <h4 className="font-medium text-yellow-800 mb-2">Scheduled (3)</h4>
-              <div className="space-y-2">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-001 - Routine Service</p>
-                  <p className="text-xs text-gray-600">Westlands | Due: Jan 20</p>
-                </div>
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-004 - Filter Change</p>
-                  <p className="text-xs text-gray-600">Kilimani | Due: Jan 22</p>
-                </div>
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-002 - Inspection</p>
-                  <p className="text-xs text-gray-600">CBD | Due: Jan 25</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-green-50 p-4 rounded-lg">
-              <h4 className="font-medium text-green-800 mb-2">Completed (5)</h4>
-              <div className="space-y-2">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-005 - Deep Clean</p>
-                  <p className="text-xs text-gray-600">Completed: Jan 12</p>
-                </div>
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">ST-006 - Pump Service</p>
-                  <p className="text-xs text-gray-600">Completed: Jan 10</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Parts Inventory */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b">
-          <h3 className="text-lg font-semibold text-gray-900">Parts Inventory</h3>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Pump Units</span>
-                <Wrench className="w-4 h-4 text-gray-400" />
-              </div>
-              <p className="text-2xl font-bold text-gray-900">12</p>
-              <p className="text-xs text-green-600">In Stock</p>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Batteries</span>
-                <Battery className="w-4 h-4 text-gray-400" />
-              </div>
-              <p className="text-2xl font-bold text-gray-900">8</p>
-              <p className="text-xs text-yellow-600">Low Stock</p>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Filters</span>
-                <div className="w-4 h-4 bg-gray-400 rounded-full" />
-              </div>
-              <p className="text-2xl font-bold text-gray-900">25</p>
-              <p className="text-xs text-green-600">In Stock</p>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Sensors</span>
-                <div className="w-4 h-4 bg-gray-400 rounded" />
-              </div>
-              <p className="text-2xl font-bold text-gray-900">6</p>
-              <p className="text-xs text-red-600">Critical</p>
             </div>
           </div>
         </div>

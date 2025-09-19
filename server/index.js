@@ -48,6 +48,76 @@ app.post('/api/paystack/init', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/ai/smart-booking/suggest
+ * Body: {
+ *   date?: ISO string (requested),
+ *   location?: string,
+ *   units?: number,
+ *   durationDays?: number,
+ *   capacityPerDay?: number,
+ *   bookingsHistory?: Array<{ date: ISO }>
+ * }
+ * Returns: { requested, suggestion, alternatives }
+ */
+app.post('/api/ai/smart-booking/suggest', (req, res) => {
+  try {
+    const {
+      date,
+      location = '',
+      units = 1,
+      durationDays = 1,
+      capacityPerDay = 80,
+      bookingsHistory = [],
+    } = req.body || {};
+
+    // Forecast next 30 days using provided history (if any)
+    const fc = Forecast.forecastBookings(Array.isArray(bookingsHistory) ? bookingsHistory : [], 30, capacityPerDay);
+    const indexByDate = new Map(fc.forecasts.map((f) => [f.date, f.forecast]));
+
+    // Build candidate window: requested date +/- 3 days; if no requested, take next 7 days
+    const requested = date ? new Date(date) : new Date();
+    if (isNaN(requested.getTime())) return res.status(400).json({ error: 'Invalid requested date' });
+
+    const candidates = [];
+    const windowDays = date ? 3 : 7;
+    for (let offset = -windowDays; offset <= windowDays; offset++) {
+      if (!date && offset < 1) continue; // when no requested, only look forward
+      const d = new Date(requested);
+      d.setDate(d.getDate() + offset);
+      const key = d.toISOString().slice(0, 10);
+      const forecast = indexByDate.get(key) ?? fc.summary?.avgDailyForecast ?? 0;
+      const utilization = capacityPerDay > 0 ? Math.min(1, forecast / capacityPerDay) : 0;
+      const proximity = 1 - Math.min(1, Math.abs(offset) / windowDays); // closer to requested is better
+      // Lower utilization better; combine with proximity
+      const score = 0.7 * (1 - utilization) + 0.3 * proximity;
+      candidates.push({ date: key, forecast, utilization: Number(utilization.toFixed(2)), score: Number(score.toFixed(3)) });
+    }
+
+    // Sort best first
+    candidates.sort((a, b) => b.score - a.score);
+    const suggestion = candidates[0];
+    const alternatives = candidates.slice(1, 4);
+
+    return res.json({
+      requested: {
+        date: requested.toISOString().slice(0, 10),
+        location,
+        units,
+        durationDays,
+      },
+      suggestion,
+      alternatives,
+      capacityPerDay,
+      summary: fc.summary,
+      recommendation: fc.recommendation,
+    });
+  } catch (err) {
+    console.error('[ai/smart-booking/suggest] error', err?.message || err);
+    res.status(500).json({ error: 'Failed to suggest smart booking' });
+  }
+});
+
 // ------------------------------
 // Lightweight AI Endpoints
 // ------------------------------
