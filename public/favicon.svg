@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#16a34a"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="url(#g)"/>
+  <g fill="#fff" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Map pin -->
+    <path d="M32 12c6.075 0 11 4.925 11 11 0 8.25-11 19-11 19s-11-10.75-11-19c0-6.075 4.925-11 11-11z" fill="none"/>
+    <circle cx="32" cy="23" r="4"/>
+    <!-- Spark/insight tick -->
+    <path d="M22 44h20M26 48h12M30 52h4"/>
+  </g>
+</svg>
