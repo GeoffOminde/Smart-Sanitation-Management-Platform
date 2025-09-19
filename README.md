@@ -32,6 +32,10 @@ Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 - **Maintenance Scheduling** - Proactive maintenance planning and parts inventory
 - **Analytics Dashboard** - Revenue tracking, utilization metrics, and performance insights
 - **Team Management** - Staff management with role-based access control
+### AI Insights (Lightweight) 🤖
+
+- Predictive Maintenance (Heuristic) – Ranks units by risk and estimates service due dates.
+- AI Route Optimization (Heuristic) – Orders stops using urgency + distance (nearest-neighbor with weighting).
 
 ### Technical Features
 - **Responsive Design** - Works seamlessly on desktop, tablet, and mobile devices
