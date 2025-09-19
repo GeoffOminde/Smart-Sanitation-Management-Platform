@@ -29,6 +29,7 @@ import {
 import { Bell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PaymentsPage from '../Payments';
+import Insights from '../Insights';
 
 interface Unit {
   id: string;
@@ -958,6 +959,7 @@ const Dashboard: React.FC = () => {
       case 'fleet': return renderFleetMap();
       case 'routes': return renderRoutes();
       case 'payments': return <PaymentsPage />;
+      case 'insights': return <Insights />;
       case 'bookings': return renderBookings();
       case 'maintenance': return renderMaintenance();
       case 'analytics': return renderAnalytics();
@@ -980,6 +982,7 @@ const Dashboard: React.FC = () => {
                   { id: 'fleet', label: 'Fleet Map', icon: MapPin },
                   { id: 'routes', label: 'Routes', icon: Navigation },
                   { id: 'payments', label: 'Payments', icon: CreditCard },
+                  { id: 'insights', label: 'Insights', icon: BarChart3 },
                   { id: 'bookings', label: 'Bookings', icon: Calendar },
                   { id: 'maintenance', label: 'Maintenance', icon: Wrench },
                   { id: 'analytics', label: 'Analytics', icon: TrendingUp },

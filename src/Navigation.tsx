@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, Users, Truck, CreditCard } from 'lucide-react';
+import { Bell, Users, Truck, CreditCard, BarChart3 } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { useState, useRef, useEffect } from 'react';
 
@@ -46,6 +46,9 @@ const Navigation = () => {
           <div className="flex items-center space-x-4">
             <Link to="/notifications" className="p-2 text-gray-400 hover:text-gray-600">
               <Bell className="w-5 h-5" />
+            </Link>
+            <Link to="/insights" className="p-2 text-gray-400 hover:text-gray-600" title="Insights">
+              <BarChart3 className="w-5 h-5" />
             </Link>
             <Link to="/payments" className="p-2 text-gray-400 hover:text-gray-600" title="Payments">
               <CreditCard className="w-5 h-5" />
