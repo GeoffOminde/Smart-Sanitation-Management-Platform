@@ -10,6 +10,7 @@ import Payments from './Payments';
 import AdminTransactions from './AdminTransactions';
 import ProtectedLayout from './ProtectedLayout';
 import Insights from './Insights';
+import Assistant from './Assistant';
 
 function App() {
   const { isAuthenticated } = useAuth();
@@ -26,6 +27,7 @@ function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/insights" element={<Insights />} />
+          <Route path="/assistant" element={<Assistant />} />
           <Route path="/admin/transactions" element={<AdminTransactions />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/profile" element={<Profile />} />

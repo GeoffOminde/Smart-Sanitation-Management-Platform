@@ -9,6 +9,8 @@ app.use(cors());
 app.use(bodyParser.json());
 
 const PORT = parseInt(process.env.PORT, 10) || 3001;
+const AI = require('./ai');
+const Forecast = require('./forecast');
 
 // In-memory transaction store (demo only)
 const transactions = [];
@@ -43,6 +45,45 @@ app.post('/api/paystack/init', async (req, res) => {
   } catch (err) {
     console.error(err.response && err.response.data ? err.response.data : err.message);
     res.status(500).json({ error: 'Paystack init failed' });
+  }
+});
+
+// ------------------------------
+// Lightweight AI Endpoints
+// ------------------------------
+
+/**
+ * POST /api/ai/predict-maintenance
+ * Body: { units: Array<{ id, serialNo, location, fillLevel, batteryLevel, lastSeen, coordinates:[lat,lon] }> }
+ * Returns ranked maintenance risk predictions per unit.
+ */
+app.post('/api/ai/predict-maintenance', (req, res) => {
+  try {
+    const { units } = req.body || {};
+    if (!Array.isArray(units)) return res.status(400).json({ error: 'units array is required' });
+    const results = AI.predictMaintenance(units);
+    res.json({ results });
+  } catch (err) {
+    console.error('[ai/predict-maintenance] error', err?.message || err);
+    res.status(500).json({ error: 'Failed to predict maintenance' });
+  }
+});
+
+/**
+ * POST /api/ai/route-optimize
+ * Body: { depot:[lat,lon], stops: Array<{ id, serialNo?, coordinates:[lat,lon], priority?, urgencyScore? }> }
+ * Returns an ordered route with total distance.
+ */
+app.post('/api/ai/route-optimize', (req, res) => {
+  try {
+    const { depot, stops } = req.body || {};
+    if (!Array.isArray(depot) || depot.length !== 2) return res.status(400).json({ error: 'depot must be [lat, lon]' });
+    if (!Array.isArray(stops)) return res.status(400).json({ error: 'stops array is required' });
+    const route = AI.routeOptimize({ depot, stops });
+    res.json(route);
+  } catch (err) {
+    console.error('[ai/route-optimize] error', err?.message || err);
+    res.status(500).json({ error: 'Failed to optimize route' });
   }
 });
 
@@ -163,7 +204,7 @@ function startServer(port) {
 startServer(PORT);
 
 // ------------------------------
-// OpenWeather & Hugging Face APIs
+// OpenWeather API
 // ------------------------------
 
 /**
@@ -200,62 +241,5 @@ app.get('/api/weather/current', async (req, res) => {
     const msg = err.response?.data || err.message;
     console.error('[weather/current] error', msg);
     res.status(500).json({ error: 'Failed to fetch weather' });
-  }
-});
-
-/**
- * POST /api/hf/inference
- * Body: { model: string, inputs: any, options?: object }
- * Proxies to Hugging Face Inference API.
- */
-app.post('/api/hf/inference', async (req, res) => {
-  try {
-    const token = process.env.HUGGING_FACE_TOKEN;
-    if (!token) return res.status(500).json({ error: 'Missing HUGGING_FACE_TOKEN' });
-
-    let { model, inputs, parameters, options } = req.body || {};
-    // Default to a reliable sentiment model if none provided
-    if (!model) {
-      model = 'cardiffnlp/twitter-roberta-base-sentiment-latest';
-    }
-    if (!inputs && typeof inputs !== 'string') {
-      return res.status(400).json({ error: 'inputs are required' });
-    }
-
-    const url = `https://api-inference.huggingface.co/models/${encodeURIComponent(model)}`;
-    // Build body: prefer parameters (zero-shot, etc.), else allow options for backward compat
-    const body = parameters ? { inputs, parameters } : (options ? { inputs, options } : { inputs });
-
-    const resp = await axios.post(url, body, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 60000,
-    });
-
-    // HF often returns 200 with {error: ...} JSON when the model is loading or not accessible
-    if (resp.data && resp.data.error) {
-      console.error('[hf/inference] provider error', resp.data);
-      return res.status(400).json({ error: 'HF inference failed', details: resp.data });
-    }
-
-    // Optional normalization for roberta sentiment (cardiffnlp) results
-    try {
-      const raw = resp.data;
-      const maybeArr = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
-      if (typeof model === 'string' && model.includes('roberta') && Array.isArray(maybeArr) && maybeArr[0]?.label) {
-        const labels = maybeArr.map((d) => String(d.label).toLowerCase());
-        const scores = maybeArr.map((d) => Number(d.score));
-        return res.json({ sequence: inputs, labels, scores });
-      }
-    } catch (e) {
-      // Fallback to raw response if normalization fails
-      console.warn('[hf/inference] normalization skipped', e?.message);
-    }
-
-    res.json(resp.data);
-  } catch (err) {
-    const status = err.response?.status || 500;
-    const data = err.response?.data || { error: err.message };
-    console.error('[hf/inference] error', data);
-    res.status(status).json({ error: 'HF inference failed', details: data });
   }
 });
