@@ -5,7 +5,9 @@ A comprehensive fleet management dashboard for mobile toilet rental companies op
 ### 🌱 How the Platform Strengthens SDG Impact
 ---
 Directly: Provides reliable sanitation services (SDG 6, SDG 3).
+
 Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
+
 Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 
 ## 📋 Table of Contents
