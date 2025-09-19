@@ -1,6 +1,6 @@
 # Smart Sanitation Management Platform
 
-A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
+A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, AI-powered insights, route optimization, booking management, and analytics for portable sanitation units.
 
 ### 🌱 How the Platform Strengthens SDG Impact
 ---
