@@ -1,30 +1,14 @@
-### Vercel (frontend) + Render (backend) rewrites
-- The included `vercel.json` rewrites production `/api/*` requests to your Render backend (Option A):
-  - `https://smart-sanitation-management-platform-2.onrender.com/api/*`
-- No CORS issues on the client. Ensure env vars are set on your backend host (Render) for OpenWeather/HF.
-
-### AI & Data
-- **OpenWeather**: Current weather data (requires `OPENWEATHER_API_KEY` in backend env)
-- **Hugging Face Inference API**: Text analysis (requires `HUGGING_FACE_TOKEN` in backend env)
-
-### 8. Insights (OpenWeather + Hugging Face)
-- **Weather**: Fetch current weather (temperature, humidity, wind, condition) via OpenWeather
-- **Text Analysis**: Run sentiment or zero-shot classification using Hugging Face Inference API
-- **Navigation**: Accessible from the header icon or the dashboard sidebar
-
-Setup requirements for Insights:
-- Backend must be running with these environment variables set in `server/.env` (do NOT commit this file):
-  - `OPENWEATHER_API_KEY` — get from https://openweathermap.org/api
-  - `HUGGING_FACE_TOKEN` — create a token at https://huggingface.co/settings/tokens ("read" scope)
-
-Endpoints (served by the included Express demo backend):
-- `GET /api/weather/current?city=Nairobi`
-- `POST /api/hf/inference` with JSON body `{ "model": string, "inputs": any, "options"?: object }`
-
 # Smart Sanitation Management Platform
 
 A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
 
+### 🌱 How the Platform Strengthens SDG Impact
+---
+Directly: Provides reliable sanitation services (SDG 6, SDG 3).
+
+Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
+
+Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 
 ## 📋 Table of Contents
 
@@ -48,6 +32,14 @@ A comprehensive fleet management dashboard for mobile toilet rental companies op
 - **Maintenance Scheduling** - Proactive maintenance planning and parts inventory
 - **Analytics Dashboard** - Revenue tracking, utilization metrics, and performance insights
 - **Team Management** - Staff management with role-based access control
+### AI Insights (Lightweight) 🤖
+
+- Predictive Maintenance (Heuristic) – Ranks units by risk and estimates service due dates.
+- AI Route Optimization (Heuristic) – Orders stops using urgency + distance (nearest-neighbor with weighting).
+- AI Insights (Predictive Maintenance + Route Optimization)
+- Demand Forecasting (real bookings if available, fallback to demo)
+- Prescriptive Alerts right in the dashboard (actionable “what to do next”)
+- Assistant UI (chat interface with locale toggle → English/Swahili)
 
 ### Technical Features
 - **Responsive Design** - Works seamlessly on desktop, tablet, and mobile devices
@@ -145,7 +137,7 @@ Password: Admin
 
 ### Environment Setup
 
-The application runs entirely in the browser with mock data. No additional environment variables or backend setup is required for development.
+The application runs entirely in the browser with mock data. 
 
 ## 🎛 Dashboard Modules
 
@@ -294,8 +286,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For support and questions:
 - **Email**: support@smartsanitation.co.ke
-- **Phone**: +254 700 123 456
-- **Documentation**: [Project Wiki](link-to-wiki)
+- **Phone**: +254 718 210 289
+
 
 ## 🗺 Roadmap
 
@@ -307,11 +299,7 @@ For support and questions:
 - [ ] Integration with IoT sensors
 - [ ] Customer self-service portal
 
-### 🌱 How the Platform Strengthens SDG Impact
----
-Directly: Provides reliable sanitation services (SDG 6, SDG 3).
-Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
-Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
+
 
 ### Version History
 ---
@@ -319,28 +307,6 @@ Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 - **v1.1.0** - Enhanced mobile responsiveness
 - **v1.2.0** - Advanced analytics and reporting
 
-
-
-## Payments backend (demo)
-
-A small Express demo server is included under `server/` to help test Paystack and M-Pesa integrations.
-
-Quick start:
-
-1. Copy `server/.env.example` to `server/.env` and fill your keys (do not commit this file).
-2. Install dependencies and run:
-
-   cd server; npm install; npm start
-
-3. The server listens on the port defined in `server/.env` (default 3001). It exposes endpoints:
-   - POST /api/paystack/init -> Initialize a Paystack transaction (server-side)
-   - GET /api/mpesa/token -> Get OAuth token from Safaricom sandbox/production
-   - POST /api/mpesa/stk -> Initiate STK Push (M-Pesa)
-
-During development, the frontend proxies `/api/*` requests to `http://localhost:3001` via `vite.config.ts`.
-
-Security:
-- Never commit secret keys to source control. Use environment variables or a secret manager.
 
 ---
 **Built with ❤️ for the East African sanitation industry**

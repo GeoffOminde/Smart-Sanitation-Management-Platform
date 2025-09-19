@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from './lib/api';
-import { Cloud, Sun, Wind, Droplets, BarChart3, MessageSquare } from 'lucide-react';
+import { Cloud, Sun, Wind, Droplets, BarChart3, Navigation, Wrench } from 'lucide-react';
 
 const defaultCity = 'Nairobi';
 
@@ -10,11 +10,7 @@ const Insights = () => {
   const [wLoading, setWLoading] = useState(false);
   const [wError, setWError] = useState<string | null>(null);
 
-  const [text, setText] = useState('Great service and fast response!');
-  const [model, setModel] = useState('distilbert-base-uncased-finetuned-sst-2-english');
-  const [hfResult, setHfResult] = useState<any | null>(null);
-  const [hfLoading, setHfLoading] = useState(false);
-  const [hfError, setHfError] = useState<string | null>(null);
+  // Text analysis removed
 
   const fetchWeather = async (selectedCity: string) => {
     setWLoading(true);
@@ -37,41 +33,77 @@ const Insights = () => {
     }
   };
 
-  const runInference = async () => {
-    setHfLoading(true);
-    setHfError(null);
-    setHfResult(null);
-    try {
-      // Build payload: zero-shot models expect `parameters.candidate_labels`
-      const isZeroShot = model === 'facebook/bart-large-mnli';
-      const payload: any = {
-        model,
-        inputs: text,
-      };
-      if (isZeroShot) {
-        payload.parameters = { candidate_labels: ['positive', 'negative', 'neutral'] };
-      }
+  // Demand Forecasting (bookings/utilization)
+  const [fcLoading, setFcLoading] = useState(false);
+  const [fcError, setFcError] = useState<string | null>(null);
+  const [fcResult, setFcResult] = useState<any | null>(null);
+  const [capacity, setCapacity] = useState<number>(80); // units/day capacity (demo)
+  const [sourceBookings, setSourceBookings] = useState<{ date: string }[] | null>(null);
 
-      const resp = await apiFetch('/api/hf/inference', {
+  // Generate demo bookings: last 60 days random-ish counts
+  const demoBookings = Array.from({ length: 60 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (60 - i));
+    // base demand with weekly seasonality
+    const dow = d.getDay();
+    const base = 30 + (dow === 3 || dow === 4 ? 8 : 0) - (dow === 0 || dow === 6 ? 6 : 0);
+    const noise = Math.round((Math.random() - 0.5) * 8);
+    const count = Math.max(0, base + noise);
+    return Array.from({ length: count }, () => ({ date: d.toISOString() }));
+  }).flat();
+
+  const loadRealBookings = async () => {
+    try {
+      const resp = await apiFetch('/api/bookings');
+      if (!resp.ok) throw new Error('not ok');
+      const data = await resp.json();
+      // Expecting shape: [{ date: ISO, ... }]
+      if (Array.isArray(data)) {
+        const mapped = data
+          .map((b: any) => ({ date: (b?.date ? new Date(b.date).toISOString() : null) }))
+          .filter((b: any) => !!b.date);
+        if (mapped.length) {
+          setSourceBookings(mapped);
+          return;
+        }
+      }
+      // fallthrough -> keep null to use demo
+    } catch {
+      // ignore, fallback to demo
+    }
+  };
+
+  useEffect(() => {
+    loadRealBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const runForecast = async () => {
+    setFcLoading(true);
+    setFcError(null);
+    setFcResult(null);
+    try {
+      const resp = await apiFetch('/api/ai/forecast-bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ bookings: sourceBookings ?? demoBookings, horizonDays: 30, capacityPerDay: capacity })
       });
       if (!resp.ok) {
         let detail = '';
-        try { const j = await resp.json(); detail = j?.error || j?.details?.error || JSON.stringify(j); } catch {}
-        // Common cause: Missing HUGGING_FACE_TOKEN on the server
-        throw new Error(`HF failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+        throw new Error(`Forecast failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
       }
       const data = await resp.json();
-      setHfResult(data);
+      setFcResult(data);
     } catch (e: any) {
-      setHfError(e?.message || 'Failed to run inference');
-      console.error('[Insights] hf error', e);
+      setFcError(e?.message || 'Failed to forecast demand');
+      console.error('[Insights] forecast error', e);
     } finally {
-      setHfLoading(false);
+      setFcLoading(false);
     }
   };
+
+  // Text analysis removed
 
   useEffect(() => {
     fetchWeather(city);
@@ -82,6 +114,81 @@ const Insights = () => {
   const humidity = weather?.main?.humidity;
   const wind = weather?.wind?.speed;
   const condition = weather?.weather?.description || weather?.weather?.main || '—';
+
+  // --- Demo AI: Predictive maintenance and route optimization ---
+  const demoUnits = [
+    { id: '1', serialNo: 'ST-001', location: 'Westlands', fillLevel: 85, batteryLevel: 92, lastSeen: new Date(Date.now() - 2 * 60 * 1000).toISOString(), coordinates: [-1.2641, 36.8078] },
+    { id: '2', serialNo: 'ST-002', location: 'CBD',       fillLevel: 45, batteryLevel: 78, lastSeen: new Date(Date.now() - 5 * 60 * 1000).toISOString(), coordinates: [-1.2921, 36.8219] },
+    { id: '3', serialNo: 'ST-003', location: 'Karen',     fillLevel: 92, batteryLevel: 15, lastSeen: new Date(Date.now() - 60 * 60 * 1000).toISOString(), coordinates: [-1.3197, 36.6859] },
+    { id: '4', serialNo: 'ST-004', location: 'Kilimani',  fillLevel: 23, batteryLevel: 88, lastSeen: new Date(Date.now() - 3 * 60 * 1000).toISOString(), coordinates: [-1.2906, 36.7820] },
+  ];
+
+  const [pmLoading, setPmLoading] = useState(false);
+  const [pmError, setPmError] = useState<string | null>(null);
+  const [pmResults, setPmResults] = useState<any[] | null>(null);
+
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [routeResult, setRouteResult] = useState<any | null>(null);
+
+  const runPredictiveMaintenance = async () => {
+    setPmLoading(true);
+    setPmError(null);
+    setPmResults(null);
+    try {
+      const resp = await apiFetch('/api/ai/predict-maintenance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ units: demoUnits })
+      });
+      if (!resp.ok) {
+        let detail = '';
+        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+        throw new Error(`Predictive maintenance failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+      }
+      const data = await resp.json();
+      setPmResults(data?.results || []);
+    } catch (e: any) {
+      setPmError(e?.message || 'Failed to run predictive maintenance');
+      console.error('[Insights] pm error', e);
+    } finally {
+      setPmLoading(false);
+    }
+  };
+
+  const runRouteOptimization = async () => {
+    setRouteLoading(true);
+    setRouteError(null);
+    setRouteResult(null);
+    try {
+      const depot: [number, number] = [-1.286389, 36.817223]; // Nairobi CBD
+      // Use top risky units (or all if not run yet)
+      const stopsSource = (pmResults && pmResults.length ? pmResults : demoUnits).map((r: any) => ({
+        id: r.id,
+        serialNo: r.serialNo,
+        coordinates: r.coordinates || demoUnits.find(u => u.id === r.id)?.coordinates,
+        priority: r.risk || 'medium',
+      }));
+
+      const resp = await apiFetch('/api/ai/route-optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depot, stops: stopsSource })
+      });
+      if (!resp.ok) {
+        let detail = '';
+        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+        throw new Error(`Route optimization failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+      }
+      const data = await resp.json();
+      setRouteResult(data);
+    } catch (e: any) {
+      setRouteError(e?.message || 'Failed to optimize route');
+      console.error('[Insights] route error', e);
+    } finally {
+      setRouteLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -95,13 +202,13 @@ const Insights = () => {
               </div>
               <div className="ml-3">
                 <h2 className="text-2xl font-semibold text-gray-900">Insights</h2>
-                <p className="text-sm text-gray-500">Weather and text analysis powered by OpenWeather and Hugging Face</p>
+                <p className="text-sm text-gray-500">Weather insights powered by OpenWeather</p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Weather + HF sections */}
+        {/* Weather + AI section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Weather */}
           <div className="bg-white p-6 rounded-lg shadow-sm border">
@@ -163,64 +270,153 @@ const Insights = () => {
             )}
           </div>
 
-          {/* Hugging Face */}
+          {/* AI Section */}
           <div className="bg-white p-6 rounded-lg shadow-sm border">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Text Analysis</h3>
+              <h3 className="text-lg font-semibold text-gray-900">AI Insights</h3>
             </div>
 
-            <div className="space-y-3 mb-4">
-              <textarea
-                className="w-full border rounded p-3 text-sm"
-                rows={4}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Type text to analyze"
-              />
-              <div className="flex items-center gap-2">
-                <select
-                  className="border rounded px-3 py-2 text-sm"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  <option value="distilbert-base-uncased-finetuned-sst-2-english">Sentiment (distilbert)</option>
-                  <option value="facebook/bart-large-mnli">Zero-shot classification (BART MNLI)</option>
-                </select>
+            {/* Predictive Maintenance */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center mr-2">
+                    <Wrench className="w-4 h-4 text-green-700" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">Predictive Maintenance</p>
+                    <p className="text-xs text-gray-500">Rank units by service risk and due date</p>
+                  </div>
+                </div>
                 <button
-                  onClick={runInference}
+                  onClick={runPredictiveMaintenance}
                   className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                  disabled={hfLoading || !text.trim()}
+                  disabled={pmLoading}
                 >
-                  {hfLoading ? 'Analyzing...' : 'Analyze'}
+                  {pmLoading ? 'Analyzing...' : 'Run' }
                 </button>
               </div>
-              {model === 'facebook/bart-large-mnli' && (
-                <div className="text-xs text-gray-500">Using candidate labels: positive, negative, neutral</div>
-              )}
-              {hfError && (
-                <div className="text-red-600 text-sm">
-                  {hfError}
-                  {/HUGGING_FACE_TOKEN/i.test(hfError) && (
-                    <>
-                      {' '}
-                      — Configure HUGGING_FACE_TOKEN in server/.env and restart the backend.
-                    </>
-                  )}
+
+              {pmError && <div className="text-red-600 text-sm mt-3">{pmError}</div>}
+
+              {pmResults && (
+                <div className="mt-4 overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-gray-500">Unit</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Risk</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Score</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Due (days)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {pmResults.map((r) => (
+                        <tr key={r.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2">{r.serialNo || r.id}</td>
+                          <td className="px-3 py-2 capitalize">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${r.risk === 'high' ? 'text-red-700 bg-red-100' : r.risk === 'medium' ? 'text-yellow-700 bg-yellow-100' : 'text-green-700 bg-green-100'}`}>{r.risk}</span>
+                          </td>
+                          <td className="px-3 py-2">{r.riskScore}</td>
+                          <td className="px-3 py-2">{r.serviceDueInDays}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
 
-            {hfResult ? (
-              <div className="p-4 border rounded-lg">
-                <div className="flex items-center mb-2">
-                  <MessageSquare className="w-4 h-4 mr-2 text-gray-500" />
-                  <p className="text-sm text-gray-600">Result</p>
+            {/* Route Optimization */}
+            <div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-2">
+                    <Navigation className="w-4 h-4 text-blue-700" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">Route Optimization</p>
+                    <p className="text-xs text-gray-500">Order stops by urgency and distance</p>
+                  </div>
                 </div>
-                <pre className="text-xs text-gray-700 bg-gray-50 rounded p-3 overflow-auto max-h-64">{JSON.stringify(hfResult, null, 2)}</pre>
+                <button
+                  onClick={runRouteOptimization}
+                  className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                  disabled={routeLoading}
+                >
+                  {routeLoading ? 'Optimizing...' : 'Optimize' }
+                </button>
               </div>
-            ) : (
-              !hfLoading && <p className="text-sm text-gray-500">Select a model and analyze the text above.</p>
-            )}
+
+              {routeError && <div className="text-red-600 text-sm mt-3">{routeError}</div>}
+
+              {routeResult && (
+                <div className="mt-4">
+                  <p className="text-sm text-gray-600 mb-2">Total Distance: <span className="font-medium">{routeResult.totalDistanceKm} km</span></p>
+                  <ol className="list-decimal ml-5 space-y-1 text-sm">
+                    {routeResult.orderedStops?.map((s: any) => (
+                      <li key={s.id}>
+                        {(s.serialNo || s.id)} — {s.legDistanceKm} km
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+
+            {/* Demand Forecasting */}
+            <div className="mt-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-900">Demand Forecasting</p>
+                  <p className="text-xs text-gray-500">30-day forecast and utilization</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={capacity}
+                    onChange={(e) => setCapacity(Number(e.target.value))}
+                    className="w-28 border rounded px-3 py-2 text-sm"
+                    placeholder="Capacity/day"
+                    title="Capacity per day"
+                  />
+                  <button
+                    onClick={runForecast}
+                    className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    disabled={fcLoading}
+                  >
+                    {fcLoading ? 'Forecasting...' : 'Forecast'}
+                  </button>
+                </div>
+              </div>
+
+              {fcError && <div className="text-red-600 text-sm mt-3">{fcError}</div>}
+
+              {fcResult && (
+                <div className="mt-4 space-y-2 text-sm">
+                  <p>Avg Daily Forecast: <span className="font-medium">{fcResult.summary?.avgDailyForecast}</span></p>
+                  {typeof fcResult.utilization === 'number' && (
+                    <p>Projected Utilization: <span className="font-medium">{Math.round(fcResult.utilization * 100)}%</span></p>
+                  )}
+                  {fcResult.summary?.peakDay && (
+                    <p>Peak Day: <span className="font-medium">{fcResult.summary.peakDay.date}</span> with {fcResult.summary.peakDay.forecast} bookings</p>
+                  )}
+                  {fcResult.recommendation && (
+                    <div className="p-3 bg-yellow-50 border rounded text-yellow-800">{fcResult.recommendation}</div>
+                  )}
+                  {/* Simple textual display of first 7 days */}
+                  <div className="mt-2">
+                    <p className="text-gray-600 mb-1">Next 7 days:</p>
+                    <ul className="list-disc ml-5 space-y-1">
+                      {fcResult.forecasts?.slice(0,7).map((f: any) => (
+                        <li key={f.date}>{f.date}: {f.forecast}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

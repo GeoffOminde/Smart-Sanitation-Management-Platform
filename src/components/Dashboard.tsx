@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { apiFetch } from '../lib/api';
 import { 
   MapPin, 
   Truck, 
@@ -96,6 +97,31 @@ const Dashboard: React.FC = () => {
   }, []);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Prescriptive recommendation (demand forecast)
+  const [recText, setRecText] = useState<string | null>(null);
+  const [recVisible, setRecVisible] = useState(true);
+
+  useEffect(() => {
+    const loadRecommendation = async () => {
+      try {
+        // Use existing bookings array (below) to build simple history
+        const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
+        const resp = await apiFetch('/api/ai/forecast-bookings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookings: history, horizonDays: 30, capacityPerDay: 80 })
+        });
+        if (!resp.ok) throw new Error('forecast not ok');
+        const data = await resp.json();
+        if (data?.recommendation) setRecText(String(data.recommendation));
+      } catch {
+        // ignore if endpoint not available; keep alert hidden
+      }
+    };
+    loadRecommendation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Mock data
   const units: Unit[] = [
     { id: '1', serialNo: 'ST-001', location: 'Westlands', fillLevel: 85, batteryLevel: 92, status: 'active', lastSeen: '2 min ago', coordinates: [-1.2641, 36.8078] },
@@ -145,6 +171,19 @@ const Dashboard: React.FC = () => {
 
   const renderOverview = () => (
     <div className="space-y-6">
+      {recText && recVisible && (
+        <div className="flex items-start justify-between p-4 border rounded-lg bg-yellow-50">
+          <div className="flex items-start">
+            <AlertTriangle className="w-5 h-5 text-yellow-700 mr-3 mt-0.5" />
+            <div>
+              <p className="text-sm text-yellow-800">
+                <span className="font-medium">Prescriptive Insight:</span> {recText}
+              </p>
+            </div>
+          </div>
+          <button className="text-yellow-700 text-sm" onClick={() => setRecVisible(false)}>Dismiss</button>
+        </div>
+      )}
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-lg shadow-sm border">
