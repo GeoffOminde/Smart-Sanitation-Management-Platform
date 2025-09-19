@@ -1,6 +1,6 @@
 # Smart Sanitation Management Platform
 
-A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
+A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, AI-powered insights, route optimization, booking management, and analytics for portable sanitation units.
 
 ### 🌱 How the Platform Strengthens SDG Impact
 ---
@@ -22,24 +22,57 @@ Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 - [Contributing](#contributing)
 - [License](#license)
 
-## ✨ Features
+### ✨ Features
+Core Functionality
 
-### Core Functionality
-- **Real-time Fleet Monitoring** - Track all portable toilet units with live status updates
-- **Interactive Fleet Map** - Visual representation of unit locations with status indicators
-- **Route Optimization** - Intelligent routing for maintenance and servicing teams
-- **Booking Management** - Complete customer booking lifecycle management
-- **Maintenance Scheduling** - Proactive maintenance planning and parts inventory
-- **Analytics Dashboard** - Revenue tracking, utilization metrics, and performance insights
-- **Team Management** - Staff management with role-based access control
-### AI Insights (Lightweight) 🤖
+- Unit Tracking → GPS + status of all mobile toilets in real time
+- Booking Management → Handle event and corporate bookings
+- Fleet Monitoring → Vehicle + driver tracking for servicing routes
+- Route Optimization → AI-assisted service scheduling and shortest routes
+- Analytics Dashboard → Utilization, service frequency, demand trends
+- Payment Integration → M-Pesa & Paystack (for African markets)
+- Notifications → Alerts for servicing needs, overuse, or low supplies
+- Multilingual Support → English & Swahili UI
+  
+### 🤖 AI Features
 
-- Predictive Maintenance (Heuristic) – Ranks units by risk and estimates service due dates.
-- AI Route Optimization (Heuristic) – Orders stops using urgency + distance (nearest-neighbor with weighting).
-- AI Insights (Predictive Maintenance + Route Optimization)
-- Demand Forecasting (real bookings if available, fallback to demo)
-- Prescriptive Alerts right in the dashboard (actionable “what to do next”)
-- Assistant UI (chat interface with locale toggle → English/Swahili)
+This platform comes with lightweight, heuristic AI features designed to optimize sanitation management without heavy compute costs.
+
+✅ Current AI Capabilities
+
+**1. Predictive Maintenance**
+
+- Ranks units by likelihood of needing servicing.
+
+- Uses fill levels, battery status, and usage history.
+
+**2. AI Route Optimization**
+
+Dynamic reordering of service stops by urgency + proximity.
+
+Reduces fuel costs and servicing delays.
+
+**3. Demand Forecasting**
+
+Forecasts peak demand using classical heuristics (moving averages & seasonal trends).
+
+Suggests inventory scaling before high-usage events.
+
+**4. Prescriptive Alerts**
+
+Actionable insights (e.g., “Deploy 10 more units to Nairobi this weekend”).
+
+**5. Rule-based Assistant (English & Swahili)**
+
+Integrated chatbot that helps staff/customers:
+
+- Book units
+- Check prices
+- Request servicing
+- Answer FAQs
+- Smart Booking Suggestions
+- Suggests alternative dates, unit availability, and pricing adjustments.
+- Integrated into the Bookings dashboard.
 
 ### Technical Features
 - **Responsive Design** - Works seamlessly on desktop, tablet, and mobile devices
