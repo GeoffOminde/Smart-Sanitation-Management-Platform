@@ -36,6 +36,10 @@ Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 
 - Predictive Maintenance (Heuristic) – Ranks units by risk and estimates service due dates.
 - AI Route Optimization (Heuristic) – Orders stops using urgency + distance (nearest-neighbor with weighting).
+- AI Insights (Predictive Maintenance + Route Optimization)
+- Demand Forecasting (real bookings if available, fallback to demo)
+- Prescriptive Alerts right in the dashboard (actionable “what to do next”)
+- Assistant UI (chat interface with locale toggle → English/Swahili)
 
 ### Technical Features
 - **Responsive Design** - Works seamlessly on desktop, tablet, and mobile devices
