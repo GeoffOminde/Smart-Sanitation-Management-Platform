@@ -349,6 +349,217 @@ const Dashboard: React.FC = () => {
     </div>
   );
 
+  const renderRoutes = () => (
+    <div className="space-y-6">
+      {/* Active Routes */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b">
+          <h3 className="text-lg font-semibold text-gray-900">Active Routes</h3>
+        </div>
+        <div className="overflow-x-auto p-6 pt-0">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Units</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ETA</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {routes.map((route) => (
+                <tr key={route.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{route.technician}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{route.units}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(route.status)}`}>{route.status}</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{route.estimatedTime}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(route.priority)}`}>{route.priority}</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                    <button className="text-blue-600 hover:text-blue-900" onClick={() => alert('View route details')}><Eye className="w-4 h-4" /></button>
+                    <button className="text-green-600 hover:text-green-900" onClick={() => alert('Edit route')}><Edit className="w-4 h-4" /></button>
+                    <button className="text-red-600 hover:text-red-900" onClick={() => alert('Delete route')}><Trash2 className="w-4 h-4" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Route Optimizer */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b">
+          <h3 className="text-lg font-semibold text-gray-900">Route Optimizer</h3>
+        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Depot Location</label>
+              <select className="w-full border border-gray-300 rounded-md px-3 py-2">
+                <option>Westlands Depot</option>
+                <option>CBD Depot</option>
+                <option>Karen Depot</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
+              <select className="w-full border border-gray-300 rounded-md px-3 py-2">
+                <option>Fill Level Priority</option>
+                <option>Distance Priority</option>
+                <option>Customer Priority</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Time Window</label>
+              <select className="w-full border border-gray-300 rounded-md px-3 py-2">
+                <option>Morning (6AM - 12PM)</option>
+                <option>Afternoon (12PM - 6PM)</option>
+                <option>Full Day (6AM - 6PM)</option>
+              </select>
+            </div>
+          </div>
+          <button className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" onClick={() => alert('Routes optimized!')}>
+            <Navigation className="w-4 h-4 mr-2 inline" />
+            Optimize Routes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderBookings = () => (
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900">Bookings Management</h3>
+            <div className="flex items-center space-x-2">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input type="text" placeholder="Search bookings..." className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              </div>
+              <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Create new booking')}>
+                <Plus className="w-4 h-4 mr-2 inline" />
+                New Booking
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {bookings
+                .filter(b => b.customer.toLowerCase().includes(searchTerm.toLowerCase()) || b.unit.toLowerCase().includes(searchTerm.toLowerCase()))
+                .map((booking) => (
+                  <tr key={booking.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{booking.customer}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.unit}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.date}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.duration}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">KSh {booking.amount.toLocaleString()}</td>
+                    <td className="px-6 py-4 whitespace-nowrap"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>{booking.status}</span></td>
+                    <td className="px-6 py-4 whitespace-nowrap"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(booking.paymentStatus)}`}>{booking.paymentStatus}</span></td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                      <button className="text-blue-600 hover:text-blue-900" onClick={() => alert('View booking details')}><Eye className="w-4 h-4" /></button>
+                      <button className="text-green-600 hover:text-green-900" onClick={() => alert('Edit booking')}><Edit className="w-4 h-4" /></button>
+                      <button className="text-red-600 hover:text-red-900" onClick={() => alert('Delete booking')}><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Smart Booking */}
+        <div className="p-6 border-t space-y-4">
+          <h4 className="text-md font-semibold text-gray-900">Smart Booking</h4>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <input type="date" className="border rounded px-3 py-2 text-sm" value={sbDate} onChange={(e) => setSbDate(e.target.value)} />
+            <input type="text" className="border rounded px-3 py-2 text-sm" value={sbLocation} onChange={(e) => setSbLocation(e.target.value)} placeholder="Location" />
+            <input type="number" min={1} className="border rounded px-3 py-2 text-sm" value={sbUnits} onChange={(e) => setSbUnits(Number(e.target.value))} placeholder="# Units" />
+            <input type="number" min={1} className="border rounded px-3 py-2 text-sm" value={sbDuration} onChange={(e) => setSbDuration(Number(e.target.value))} placeholder="Duration (days)" />
+            <div className="flex items-center gap-2">
+              <input type="number" min={0} className="border rounded px-3 py-2 text-sm w-full" value={sbCapacity} onChange={(e) => setSbCapacity(Number(e.target.value))} placeholder="Capacity/day" />
+              <button onClick={smartSuggest} className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700" disabled={sbLoading}>{sbLoading ? 'Suggesting...' : 'Smart Suggest'}</button>
+            </div>
+          </div>
+
+          {sbError && <div className="text-red-600 text-sm">{sbError}</div>}
+
+          {(sbSuggestion || (sbAlternatives && sbAlternatives.length)) && (
+            <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {sbSuggestion && (
+                <div className="border rounded p-4">
+                  <p className="text-sm text-gray-500 mb-1">Suggested</p>
+                  <p className="text-gray-900 font-medium">{sbSuggestion.date}</p>
+                  <p className="text-xs text-gray-600">Utilization: {Math.round((sbSuggestion.utilization || 0) * 100)}%</p>
+                  <button className="mt-2 text-sm text-blue-600 hover:text-blue-800" onClick={() => { if (sbSuggestion?.date) setSbDate(sbSuggestion.date); }}>Apply to booking form</button>
+                </div>
+              )}
+              {sbAlternatives && sbAlternatives.length > 0 && (
+                <div className="border rounded p-4">
+                  <p className="text-sm text-gray-500 mb-1">Alternatives</p>
+                  <ul className="text-sm list-disc ml-4 space-y-1">
+                    {sbAlternatives.map((alt) => (
+                      <li key={alt.date} className="flex items-center justify-between">
+                        <span>{alt.date} • {Math.round((alt.utilization || 0) * 100)}%</span>
+                        <button className="text-blue-600 hover:text-blue-800" onClick={() => setSbDate(alt.date)}>Use</button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderMaintenance = () => (
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b">
+          <h3 className="text-lg font-semibold text-gray-900">Maintenance Schedule</h3>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-yellow-50 p-4 rounded-lg">
+              <h4 className="font-medium text-yellow-800 mb-2">Scheduled</h4>
+              <p className="text-sm text-gray-700">3 jobs scheduled this week</p>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg">
+              <h4 className="font-medium text-green-800 mb-2">Completed</h4>
+              <p className="text-sm text-gray-700">5 jobs completed</p>
+            </div>
+            <div className="bg-red-50 p-4 rounded-lg">
+              <h4 className="font-medium text-red-800 mb-2">Critical</h4>
+              <p className="text-sm text-gray-700">1 unit needs urgent service</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderFleetMap = () => (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow-sm border">
