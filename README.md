@@ -2,6 +2,11 @@
 
 A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
 
+### 🌱 How the Platform Strengthens SDG Impact
+---
+Directly: Provides reliable sanitation services (SDG 6, SDG 3).
+Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
+Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 
 ## 📋 Table of Contents
 
@@ -306,11 +311,7 @@ For support and questions:
 - [ ] Integration with IoT sensors
 - [ ] Customer self-service portal
 
-### 🌱 How the Platform Strengthens SDG Impact
----
-Directly: Provides reliable sanitation services (SDG 6, SDG 3).
-Indirectly: Boosts economic activity, job creation, and sustainability (SDG 8, SDG 11, SDG 13).
-Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
+
 
 ### Version History
 ---
