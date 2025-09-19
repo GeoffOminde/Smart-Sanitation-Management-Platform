@@ -161,3 +161,101 @@ function startServer(port) {
 }
 
 startServer(PORT);
+
+// ------------------------------
+// OpenWeather & Hugging Face APIs
+// ------------------------------
+
+/**
+ * GET /api/weather/current?city=Nairobi
+ * Proxies to OpenWeather Current Weather API and returns a trimmed payload.
+ */
+app.get('/api/weather/current', async (req, res) => {
+  try {
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'Missing OPENWEATHER_API_KEY' });
+
+    const { city } = req.query;
+    if (!city) return res.status(400).json({ error: 'city query param is required' });
+
+    const url = 'https://api.openweathermap.org/data/2.5/weather';
+    const resp = await axios.get(url, {
+      params: { q: city, units: 'metric', appid: apiKey },
+    });
+
+    const data = resp.data;
+    const trimmed = {
+      city: data.name,
+      coord: data.coord,
+      weather: data.weather?.[0] || null,
+      main: data.main, // temp, humidity, etc.
+      wind: data.wind,
+      clouds: data.clouds,
+      dt: data.dt,
+      sys: { country: data.sys?.country, sunrise: data.sys?.sunrise, sunset: data.sys?.sunset },
+    };
+
+    res.json(trimmed);
+  } catch (err) {
+    const msg = err.response?.data || err.message;
+    console.error('[weather/current] error', msg);
+    res.status(500).json({ error: 'Failed to fetch weather' });
+  }
+});
+
+/**
+ * POST /api/hf/inference
+ * Body: { model: string, inputs: any, options?: object }
+ * Proxies to Hugging Face Inference API.
+ */
+app.post('/api/hf/inference', async (req, res) => {
+  try {
+    const token = process.env.HUGGING_FACE_TOKEN;
+    if (!token) return res.status(500).json({ error: 'Missing HUGGING_FACE_TOKEN' });
+
+    let { model, inputs, parameters, options } = req.body || {};
+    // Default to a reliable sentiment model if none provided
+    if (!model) {
+      model = 'cardiffnlp/twitter-roberta-base-sentiment-latest';
+    }
+    if (!inputs && typeof inputs !== 'string') {
+      return res.status(400).json({ error: 'inputs are required' });
+    }
+
+    const url = `https://api-inference.huggingface.co/models/${encodeURIComponent(model)}`;
+    // Build body: prefer parameters (zero-shot, etc.), else allow options for backward compat
+    const body = parameters ? { inputs, parameters } : (options ? { inputs, options } : { inputs });
+
+    const resp = await axios.post(url, body, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 60000,
+    });
+
+    // HF often returns 200 with {error: ...} JSON when the model is loading or not accessible
+    if (resp.data && resp.data.error) {
+      console.error('[hf/inference] provider error', resp.data);
+      return res.status(400).json({ error: 'HF inference failed', details: resp.data });
+    }
+
+    // Optional normalization for roberta sentiment (cardiffnlp) results
+    try {
+      const raw = resp.data;
+      const maybeArr = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
+      if (typeof model === 'string' && model.includes('roberta') && Array.isArray(maybeArr) && maybeArr[0]?.label) {
+        const labels = maybeArr.map((d) => String(d.label).toLowerCase());
+        const scores = maybeArr.map((d) => Number(d.score));
+        return res.json({ sequence: inputs, labels, scores });
+      }
+    } catch (e) {
+      // Fallback to raw response if normalization fails
+      console.warn('[hf/inference] normalization skipped', e?.message);
+    }
+
+    res.json(resp.data);
+  } catch (err) {
+    const status = err.response?.status || 500;
+    const data = err.response?.data || { error: err.message };
+    console.error('[hf/inference] error', data);
+    res.status(status).json({ error: 'HF inference failed', details: data });
+  }
+});

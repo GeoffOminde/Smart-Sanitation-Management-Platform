@@ -1,3 +1,26 @@
+### Vercel (frontend) + Render (backend) rewrites
+- The included `vercel.json` rewrites production `/api/*` requests to your Render backend (Option A):
+  - `https://smart-sanitation-management-platform-2.onrender.com/api/*`
+- No CORS issues on the client. Ensure env vars are set on your backend host (Render) for OpenWeather/HF.
+
+### AI & Data
+- **OpenWeather**: Current weather data (requires `OPENWEATHER_API_KEY` in backend env)
+- **Hugging Face Inference API**: Text analysis (requires `HUGGING_FACE_TOKEN` in backend env)
+
+### 8. Insights (OpenWeather + Hugging Face)
+- **Weather**: Fetch current weather (temperature, humidity, wind, condition) via OpenWeather
+- **Text Analysis**: Run sentiment or zero-shot classification using Hugging Face Inference API
+- **Navigation**: Accessible from the header icon or the dashboard sidebar
+
+Setup requirements for Insights:
+- Backend must be running with these environment variables set in `server/.env` (do NOT commit this file):
+  - `OPENWEATHER_API_KEY` — get from https://openweathermap.org/api
+  - `HUGGING_FACE_TOKEN` — create a token at https://huggingface.co/settings/tokens ("read" scope)
+
+Endpoints (served by the included Express demo backend):
+- `GET /api/weather/current?city=Nairobi`
+- `POST /api/hf/inference` with JSON body `{ "model": string, "inputs": any, "options"?: object }`
+
 # Smart Sanitation Management Platform
 
 A comprehensive fleet management dashboard for mobile toilet rental companies operating across East Africa. This platform provides real-time monitoring, route optimization, booking management, and analytics for portable sanitation units.
@@ -320,5 +343,4 @@ Security:
 - Never commit secret keys to source control. Use environment variables or a secret manager.
 
 ---
-
 **Built with ❤️ for the East African sanitation industry**
