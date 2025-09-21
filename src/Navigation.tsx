@@ -50,6 +50,9 @@ const Navigation = () => {
             <Link to="/insights" className="p-2 text-gray-400 hover:text-gray-600" title="Insights">
               <BarChart3 className="w-5 h-5" />
             </Link>
+            <Link to="/value" className="px-2 py-1 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded" title="Value & ROI">
+              Value
+            </Link>
             <Link to="/payments" className="p-2 text-gray-400 hover:text-gray-600" title="Payments">
               <CreditCard className="w-5 h-5" />
             </Link>
