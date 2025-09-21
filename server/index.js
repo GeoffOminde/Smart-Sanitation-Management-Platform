@@ -12,6 +12,22 @@ const PORT = parseInt(process.env.PORT, 10) || 3001;
 const AI = require('./ai');
 const Forecast = require('./forecast');
 
+// ------------------------------
+// Environment-gated safety switches and HTTP settings
+// ------------------------------
+const ENABLE_FORECAST_API = process.env.ENABLE_FORECAST_API !== 'false'; // default on
+const ENABLE_WEATHER_CACHE = process.env.ENABLE_WEATHER_CACHE === 'true'; // default off
+const WEATHER_CACHE_TTL_S = Number(process.env.WEATHER_CACHE_TTL_S || 600); // 10 minutes default
+const HTTP_TIMEOUT_MS = Number(process.env.HTTP_TIMEOUT_MS || 8000);
+const ENABLE_ANALYTICS_API = process.env.ENABLE_ANALYTICS_API === 'true'; // default off
+
+// Apply axios default timeout
+axios.defaults.timeout = HTTP_TIMEOUT_MS;
+
+// In-memory caches/stores (demo only)
+const _weatherCache = new Map(); // key: city -> { ts: Date.now(), data }
+const _analyticsEvents = []; // basic in-memory event store when enabled
+
 // In-memory transaction store (demo only)
 const transactions = [];
 let txIdCounter = 1;
@@ -157,6 +173,25 @@ app.post('/api/ai/route-optimize', (req, res) => {
   }
 });
 
+// Forecast bookings (exposes Forecast.forecastBookings) — optional
+if (ENABLE_FORECAST_API) {
+  /**
+   * POST /api/ai/forecast-bookings
+   * Body: { bookings: Array<{date: ISO}>, horizonDays?: number, capacityPerDay?: number }
+   * Returns: { forecasts, summary, utilization?, recommendation }
+   */
+  app.post('/api/ai/forecast-bookings', (req, res) => {
+    try {
+      const { bookings = [], horizonDays = 30, capacityPerDay = 0 } = req.body || {};
+      const result = Forecast.forecastBookings(Array.isArray(bookings) ? bookings : [], Number(horizonDays) || 30, Number(capacityPerDay) || 0);
+      res.json(result);
+    } catch (err) {
+      console.error('[ai/forecast-bookings] error', err?.message || err);
+      res.status(500).json({ error: 'Failed to forecast bookings' });
+    }
+  });
+}
+
 // M-Pesa: Get OAuth token (sandbox)
 app.get('/api/mpesa/token', async (req, res) => {
   try {
@@ -289,6 +324,14 @@ app.get('/api/weather/current', async (req, res) => {
     const { city } = req.query;
     if (!city) return res.status(400).json({ error: 'city query param is required' });
 
+    // Simple in-memory cache by city
+    if (ENABLE_WEATHER_CACHE) {
+      const cached = _weatherCache.get(city);
+      if (cached && (Date.now() - cached.ts) / 1000 < WEATHER_CACHE_TTL_S) {
+        return res.json(cached.data);
+      }
+    }
+
     const url = 'https://api.openweathermap.org/data/2.5/weather';
     const resp = await axios.get(url, {
       params: { q: city, units: 'metric', appid: apiKey },
@@ -306,6 +349,10 @@ app.get('/api/weather/current', async (req, res) => {
       sys: { country: data.sys?.country, sunrise: data.sys?.sunrise, sunset: data.sys?.sunset },
     };
 
+    if (ENABLE_WEATHER_CACHE) {
+      _weatherCache.set(city, { ts: Date.now(), data: trimmed });
+    }
+
     res.json(trimmed);
   } catch (err) {
     const msg = err.response?.data || err.message;
@@ -313,3 +360,37 @@ app.get('/api/weather/current', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch weather' });
   }
 });
+
+// ------------------------------
+// Optional Analytics Events Endpoint (demo-only)
+// ------------------------------
+if (ENABLE_ANALYTICS_API) {
+  /**
+   * POST /api/analytics/events
+   * Body: { events: Array<{ name: string, userId?: string, orgId?: string, properties?: object, ts?: number }> }
+   */
+  app.post('/api/analytics/events', (req, res) => {
+    try {
+      const { events } = req.body || {};
+      if (!Array.isArray(events)) return res.status(400).json({ error: 'events array is required' });
+      const normalized = events.map((e) => ({
+        name: String(e?.name || ''),
+        userId: e?.userId || null,
+        orgId: e?.orgId || null,
+        properties: e?.properties || {},
+        ts: Number(e?.ts || Date.now()),
+      }));
+      _analyticsEvents.push(...normalized);
+      // Log to stdout in demo mode for observability
+      console.log('[analytics] ingested', normalized.length, 'events');
+      res.json({ success: true, ingested: normalized.length });
+    } catch (err) {
+      console.error('[analytics/events] error', err?.message || err);
+      res.status(500).json({ error: 'Failed to ingest analytics events' });
+    }
+  });
+  // Minimal readout for debugging
+  app.get('/api/analytics/events', (req, res) => {
+    res.json({ count: _analyticsEvents.length });
+  });
+}
