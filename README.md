@@ -160,7 +160,8 @@ npm run preview
 # Run linting
 npm run lint
 ```
-
+## 🎥 Demo Video  
+Watch how the app works here: [Smart Sanitation Platform Demo](https://video.pictory.ai/1758713605476/20250924113330223olPzPXL4QyriCYh)
 
 ### 🔑 Sample Admin Login Credentials
 Username / Email: Admin
