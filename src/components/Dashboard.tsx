@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { apiFetch } from '../lib/api';
 import { 
   MapPin, 
@@ -12,7 +14,6 @@ import {
   TrendingUp,
   Clock,
   Search,
-  Filter,
   Plus,
   Edit,
   Eye,
@@ -27,7 +28,6 @@ import {
   Shield,
   Globe
 } from 'lucide-react';
-import { Bell } from 'lucide-react';
 import PaymentsPage from '../Payments';
 import Insights from '../Insights';
 
@@ -351,7 +351,6 @@ const Dashboard: React.FC = () => {
   // Analytics controls
   const [analyticsRange, setAnalyticsRange] = useState('all');
   const [analyticsPaidOnly, setAnalyticsPaidOnly] = useState(false);
-
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [formCustomer, setFormCustomer] = useState('');
@@ -418,12 +417,74 @@ const Dashboard: React.FC = () => {
     setBookings(prev => prev.filter(b => b.id !== id));
   };
 
-  const teamMembers: TeamMember[] = [
-    { id: '1', name: 'John Kamau', role: 'Fleet Manager', email: 'john@company.com', phone: '+254712345678', status: 'active', joinDate: '2023-06-15' },
-    { id: '2', name: 'Mary Wanjiku', role: 'Field Technician', email: 'mary@company.com', phone: '+254723456789', status: 'active', joinDate: '2023-08-20' },
-    { id: '3', name: 'Peter Ochieng', role: 'Route Coordinator', email: 'peter@company.com', phone: '+254734567890', status: 'active', joinDate: '2023-09-10' },
-    { id: '4', name: 'Grace Akinyi', role: 'Customer Support', email: 'grace@company.com', phone: '+254745678901', status: 'inactive', joinDate: '2023-11-05' },
-  ];
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => {
+    const defaults: TeamMember[] = [
+      { id: '1', name: 'John Kamau', role: 'Fleet Manager', email: 'john@company.com', phone: '+254712345678', status: 'active', joinDate: '2023-06-15' },
+      { id: '2', name: 'Mary Wanjiku', role: 'Field Technician', email: 'mary@company.com', phone: '+254723456789', status: 'active', joinDate: '2023-08-20' },
+      { id: '3', name: 'Peter Ochieng', role: 'Route Coordinator', email: 'peter@company.com', phone: '+254734567890', status: 'active', joinDate: '2023-09-10' },
+      { id: '4', name: 'Grace Akinyi', role: 'Customer Support', email: 'grace@company.com', phone: '+254745678901', status: 'inactive', joinDate: '2023-11-05' },
+    ];
+    try { const s = localStorage.getItem('teamMembers'); return s ? JSON.parse(s) : defaults; } catch { return defaults; }
+  });
+  useEffect(() => { try { localStorage.setItem('teamMembers', JSON.stringify(teamMembers)); } catch {} }, [teamMembers]);
+
+  const [memberModalOpen, setMemberModalOpen] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [formMemberName, setFormMemberName] = useState('');
+  const [formMemberRole, setFormMemberRole] = useState('');
+  const [formMemberEmail, setFormMemberEmail] = useState('');
+  const [formMemberPhone, setFormMemberPhone] = useState('');
+  const [formMemberStatus, setFormMemberStatus] = useState<'active'|'inactive'>('active');
+
+  const openAddMember = () => {
+    setEditingMemberId(null);
+    setFormMemberName('');
+    setFormMemberRole('');
+    setFormMemberEmail('');
+    setFormMemberPhone('');
+    setFormMemberStatus('active');
+    setMemberModalOpen(true);
+  };
+
+  const openEditMember = (m: TeamMember) => {
+    setEditingMemberId(m.id);
+    setFormMemberName(m.name);
+    setFormMemberRole(m.role);
+    setFormMemberEmail(m.email);
+    setFormMemberPhone(m.phone);
+    setFormMemberStatus(m.status);
+    setMemberModalOpen(true);
+  };
+
+  const saveMember = () => {
+    if (editingMemberId) {
+      setTeamMembers(prev => prev.map(m => m.id === editingMemberId ? {
+        ...m,
+        name: formMemberName.trim() || m.name,
+        role: formMemberRole.trim() || m.role,
+        email: formMemberEmail.trim() || m.email,
+        phone: formMemberPhone.trim() || m.phone,
+        status: formMemberStatus,
+      } : m));
+    } else {
+      const newM: TeamMember = {
+        id: String(Date.now()),
+        name: formMemberName.trim() || 'New Member',
+        role: formMemberRole.trim() || 'Role',
+        email: formMemberEmail.trim() || 'email@example.com',
+        phone: formMemberPhone.trim() || '+2547...',
+        status: formMemberStatus,
+        joinDate: new Date().toISOString().slice(0,10),
+      };
+      setTeamMembers(prev => [newM, ...prev]);
+    }
+    setMemberModalOpen(false);
+  };
+
+  const deleteMember = (id: string) => {
+    if (!confirm('Delete this team member?')) return;
+    setTeamMembers(prev => prev.filter(m => m.id !== id));
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -618,6 +679,8 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      
 
       {/* Fleet Status */}
       <div className="bg-white rounded-lg shadow-sm border">
@@ -1010,23 +1073,31 @@ const Dashboard: React.FC = () => {
                 <option value="maintenance">Maintenance</option>
                 <option value="offline">Offline</option>
               </select>
-              <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => alert('Map refreshed!')}>
+              <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => {}}>
                 Refresh
               </button>
             </div>
           </div>
         </div>
         <div className="p-6">
-          {/* Map placeholder */}
-          <div className="bg-gray-100 rounded-lg h-96 flex items-center justify-center relative">
-            <div className="text-center">
-              <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">Interactive Map View</p>
-              <p className="text-sm text-gray-400">Showing {fleetFilter==='all' ? units.length : units.filter(u=>u.status===fleetFilter).length} units across the map{fleetFilter !== 'all' ? ` • Filter: ${fleetFilter}` : ''}</p>
-            </div>
+          <div className="rounded-lg overflow-hidden h-96">
+            <MapContainer center={[-1.2921, 36.8219]} zoom={11} scrollWheelZoom className="h-full w-full">
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+              {(fleetFilter==='all' ? units : units.filter(u=>u.status===fleetFilter)).map(u => (
+                <CircleMarker key={u.id} center={[u.coordinates[0], u.coordinates[1]]} radius={8} pathOptions={{ color: u.status==='active' ? '#22c55e' : u.status==='maintenance' ? '#eab308' : '#ef4444', fillOpacity: 0.8 }}>
+                  <Popup>
+                    <div className="text-sm">
+                      <div className="font-medium">{u.serialNo}</div>
+                      <div>{u.location}</div>
+                      <div>Fill: {u.fillLevel}% • Battery: {u.batteryLevel}%</div>
+                      <div>Status: {u.status}</div>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              ))}
+            </MapContainer>
           </div>
 
-          {/* Map Legend */}
           <div className="mt-4 flex items-center justify-center space-x-6 text-sm">
             <div className="flex items-center cursor-pointer" onClick={() => setFleetFilter('active')} title="Show Active">
               <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
@@ -1271,31 +1342,6 @@ const Dashboard: React.FC = () => {
         <div className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
-              <Bell className="w-5 h-5 text-gray-400 mr-3" />
-              <div>
-                <p className="text-sm font-medium text-gray-900">Email Notifications</p>
-                <p className="text-xs text-gray-500">Receive alerts via email</p>
-              </div>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" checked={settings.emailNotifications} onChange={e => setSettings(s => ({ ...s, emailNotifications: e.target.checked }))} />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
-          </div>
-          <div>
-            <button
-              className="mt-2 px-3 py-2 text-sm border rounded"
-              onClick={() => {
-                const channels = [settings.emailNotifications ? 'Email' : null, settings.whatsappNotifications ? 'WhatsApp' : null].filter(Boolean).join(' + ');
-                alert(channels ? `Test notification sent via ${channels}` : 'All notification channels are OFF');
-              }}
-            >
-              Send Test Notification
-            </button>
-          </div>
-          
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
               <MessageSquare className="w-5 h-5 text-gray-400 mr-3" />
               <div>
                 <p className="text-sm font-medium text-gray-900">WhatsApp Notifications</p>
@@ -1360,7 +1406,7 @@ const Dashboard: React.FC = () => {
             <h3 className="text-lg font-semibold text-gray-900">Team Members</h3>
             <button 
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              onClick={() => console.log('Add team member clicked')}
+              onClick={openAddMember}
             >
               <Plus className="w-4 h-4 mr-2 inline" />
               Add Member
@@ -1427,13 +1473,13 @@ const Dashboard: React.FC = () => {
                       </button>
                       <button 
                         className="text-green-600 hover:text-green-800 transition-colors"
-                        onClick={() => console.log('Edit member:', member.id)}
+                        onClick={() => openEditMember(member)}
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button 
                         className="text-red-600 hover:text-red-800 transition-colors"
-                        onClick={() => console.log('Delete member:', member.id)}
+                        onClick={() => deleteMember(member.id)}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1512,8 +1558,53 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Global modals */}
+      {memberModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h4 className="text-md font-semibold text-gray-900">{editingMemberId ? 'Edit Member' : 'Add Member'}</h4>
+              <button className="text-gray-500" onClick={() => setMemberModalOpen(false)}>×</button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberName} onChange={e => setFormMemberName(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberRole} onChange={e => setFormMemberRole(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input type="email" className="w-full border rounded px-3 py-2 text-sm" value={formMemberEmail} onChange={e => setFormMemberEmail(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberPhone} onChange={e => setFormMemberPhone(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select className="w-full border rounded px-3 py-2 text-sm" value={formMemberStatus} onChange={e => setFormMemberStatus(e.target.value as any)}>
+                    <option value="active">active</option>
+                    <option value="inactive">inactive</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 border-t flex items-center justify-end gap-2">
+              <button className="px-4 py-2 text-sm border rounded-md" onClick={() => setMemberModalOpen(false)}>Cancel</button>
+              <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={saveMember}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Content area only: top navigation is provided by ProtectedLayout */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex items-center justify-end mb-4">
+        </div>
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Sidebar */}
           <div className="w-full lg:w-64 flex-shrink-0">
