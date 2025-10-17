@@ -10,28 +10,96 @@ const Insights = () => {
   const [weather, setWeather] = useState<any | null>(null);
   const [wLoading, setWLoading] = useState(false);
   const [wError, setWError] = useState<string | null>(null);
+  // Removed unused retryCount state as it's not being used
 
-  // Text analysis removed
+  // Mock weather data for fallback
+  const mockWeatherData = {
+    main: {
+      temp: 25,
+      humidity: 65,
+      feels_like: 26,
+      pressure: 1012,
+    },
+    wind: {
+      speed: 3.6,
+      deg: 230,
+    },
+    weather: [
+      {
+        main: 'Clouds',
+        description: 'scattered clouds',
+        icon: '03d',
+      },
+    ],
+    name: 'Demo City',
+    isMock: true,
+  };
 
-  const fetchWeather = async (selectedCity: string) => {
+  const fetchWeather = async (selectedCity: string, retryAttempt = 0): Promise<void> => {
+    const maxRetries = 2;
+    const retryDelay = 1000; // 1 second
+    
     setWLoading(true);
     setWError(null);
+
     try {
-      track('weather_refresh_clicked', { city: selectedCity });
+      track('weather_refresh_clicked', { 
+        city: selectedCity, 
+        attempt: retryAttempt,
+        timestamp: new Date().toISOString()
+      });
+      
       const resp = await apiFetch(`/api/weather/current?city=${encodeURIComponent(selectedCity)}`);
+      
       if (!resp.ok) {
+        if (resp.status === 502 && retryAttempt < maxRetries) {
+          await new Promise<void>(resolve => setTimeout(resolve, retryDelay * (retryAttempt + 1)));
+          return fetchWeather(selectedCity, retryAttempt + 1);
+        }
+        
         let detail = '';
-        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
-        throw new Error(`Weather failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+        try { 
+          const j = await resp.json(); 
+          detail = (j as { error?: string })?.error || JSON.stringify(j);
+        } catch {}
+        
+        throw new Error(`Weather service unavailable (${resp.status}${detail ? ` - ${detail}` : ''})`);
       }
+      
       const data = await resp.json();
       setWeather(data);
-      track('weather_loaded', { city: selectedCity });
-    } catch (e: any) {
-      setWError(e?.message || 'Failed to fetch weather');
-      setWeather(null);
-      console.error('[Insights] weather error', e);
-      track('weather_error', { city: selectedCity });
+      track('weather_loaded', { 
+        city: selectedCity,
+        temperature: data?.main?.temp,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      const e = error as Error;
+      console.error('[Insights] Weather API error:', e);
+      
+      if (retryAttempt < maxRetries) {
+        await new Promise<void>(resolve => setTimeout(resolve, retryDelay * (retryAttempt + 1)));
+        return fetchWeather(selectedCity, retryAttempt + 1);
+      }
+      
+      console.warn('Using mock weather data as fallback');
+      setWeather({
+        ...mockWeatherData,
+        name: selectedCity,
+        isMock: true
+      });
+      
+      const errorMessage = e?.message || 'Failed to fetch live weather data';
+      setWError(`Using demo data: ${errorMessage}`);
+      
+      track('weather_fallback', { 
+        city: selectedCity, 
+        error: errorMessage,
+        isMock: true,
+        timestamp: new Date().toISOString()
+      });
+      
     } finally {
       setWLoading(false);
     }
@@ -64,15 +132,19 @@ const Insights = () => {
       // Expecting shape: [{ date: ISO, ... }]
       if (Array.isArray(data)) {
         const mapped = data
-          .map((b: any) => ({ date: (b?.date ? new Date(b.date).toISOString() : null) }))
-          .filter((b: any) => !!b.date);
+          .map((b: any) => ({
+            date: b?.date ? new Date(b.date).toISOString() : undefined
+          }))
+          .filter((b): b is { date: string } => typeof b.date === 'string');
+        
         if (mapped.length) {
           setSourceBookings(mapped);
           return;
         }
       }
       // fallthrough -> keep null to use demo
-    } catch {
+    } catch (error) {
+      console.error('Failed to load bookings:', error);
       // ignore, fallback to demo
     }
   };
