@@ -1,5 +1,7 @@
 import PaystackForm from './PaystackForm';
 import MpesaForm from './MpesaForm';
+import AirtelMoneyForm from './AirtelMoneyForm';
+import PayPalForm from './PayPalForm';
 import { useEffect, useState } from 'react';
 import { apiFetch } from './lib/api';
 import { CreditCard, DollarSign, TrendingUp } from 'lucide-react';
@@ -41,16 +43,12 @@ const Payments = () => {
                 <p className="text-sm text-gray-500">Collect payments and monitor recent transactions</p>
               </div>
             </div>
-            <div>
-              {connected === null && <span className="text-sm text-gray-500">Checking backend...</span>}
-              {connected === true && <span className="text-sm text-green-600">Backend connected</span>}
-              {connected === false && <span className="text-sm text-red-600">Backend unavailable</span>}
-            </div>
+            {/* Removed backend status text per request */}
           </div>
         </div>
 
         {/* Stats Cards (match overview style) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <div className="bg-white p-6 rounded-lg shadow-sm border">
             <div className="flex items-center justify-between">
               <div>
@@ -75,29 +73,48 @@ const Payments = () => {
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-lg shadow-sm border">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Backend Status</p>
-                <p className={`text-2xl font-bold ${connected ? 'text-green-700' : 'text-red-700'}`}>{connected ? 'Online' : 'Offline'}</p>
-              </div>
-              <div className={`p-3 rounded-full ${connected ? 'bg-green-100' : 'bg-red-100'}`}>
-                <CreditCard className={`w-6 h-6 ${connected ? 'text-green-600' : 'text-red-600'}`} />
-              </div>
-            </div>
-          </div>
+          
         </div>
 
-        {/* Forms */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          <PaystackForm />
-          <MpesaForm />
+        {/* Methods Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div className="space-y-6">
+            <PaystackForm />
+            <AirtelMoneyForm />
+          </div>
+          <div className="space-y-6">
+            <MpesaForm />
+            <PayPalForm />
+          </div>
         </div>
 
         {/* Recent Transactions */}
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Recent Transactions (demo)</h3>
+            <div className="flex items-center gap-2">
+              <button
+                className="px-3 py-2 text-sm border rounded"
+                onClick={checkBackend}
+              >
+                Refresh
+              </button>
+              <button
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                onClick={async () => {
+                  try {
+                    const resp = await apiFetch('/api/admin/seed', { method: 'POST' });
+                    if (resp.ok) {
+                      await checkBackend();
+                    }
+                  } catch {}
+                }}
+                disabled={!connected}
+                title={!connected ? 'Backend offline' : ''}
+              >
+                Seed Demo
+              </button>
+            </div>
           </div>
           {txs.length === 0 ? (
             <p className="text-sm text-gray-500">No transactions yet.</p>
@@ -109,7 +126,23 @@ const Payments = () => {
                     <div className="text-sm text-gray-600">{t.provider.toUpperCase()} • {new Date(t.createdAt).toLocaleString()}</div>
                     <div className="font-medium">{t.email || t.phone} — KSh {Number(t.amount || 0).toLocaleString()}</div>
                   </div>
-                  <div className="text-xs text-gray-500">ID: {t.id}</div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs text-gray-500">ID: {t.id}</div>
+                    <button
+                      className="text-red-600 hover:text-red-800 text-sm"
+                      onClick={async () => {
+                        try {
+                          const resp = await apiFetch(`/api/admin/transactions/${t.id}`, { method: 'DELETE' });
+                          if (resp.ok) {
+                            setTxs(prev => prev.filter(x => x.id !== t.id));
+                          }
+                        } catch {}
+                      }}
+                      title="Delete"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
