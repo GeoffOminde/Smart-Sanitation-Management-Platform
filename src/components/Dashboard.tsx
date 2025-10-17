@@ -94,17 +94,17 @@ const Dashboard: React.FC = () => {
     setSbAlternatives(null);
     try {
       const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
+     // NEW CODE: Cleaner, using the 'data' parameter
       const resp = await apiFetch('/api/ai/smart-booking/suggest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        data: { // This object is automatically stringified and headers are set!
           date: sbDate || undefined,
           location: sbLocation,
           units: sbUnits,
           durationDays: sbDuration,
           capacityPerDay: sbCapacity,
           bookingsHistory: history,
-        })
+        }
       });
       if (!resp.ok) {
         let detail = '';
@@ -112,7 +112,7 @@ const Dashboard: React.FC = () => {
         throw new Error(`Smart suggestion failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
       }
       const data = await resp.json();
-      setSbSuggestion(data?.suggestion || null);
+      setSbSuggestion(data?.suggestion || null);  
       setSbAlternatives(data?.alternatives || null);
     } catch (e: any) {
       setSbError(e?.message || 'Failed to get suggestion');
@@ -120,7 +120,6 @@ const Dashboard: React.FC = () => {
       setSbLoading(false);
     }
   };
-
   // Prescriptive recommendation (demand forecast)
   const [recText, setRecText] = useState<string | null>(null);
   const [recVisible, setRecVisible] = useState(true);
@@ -934,7 +933,75 @@ const Dashboard: React.FC = () => {
               Enable
             </button>
           </div>
-          
+                    // ...existing code...
+            const smartSuggest = async () => {
+              setSbLoading(true);
+              setSbError(null);
+              setSbSuggestion(null);
+              setSbAlternatives(null);
+              try {
+                const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
+                // NEW CODE: Cleaner, using the 'data' parameter
+                const resp = await apiFetch('/api/ai/smart-booking/suggest', {
+                  method: 'POST',
+                  data: { // This object is automatically stringified and headers are set!
+                    date: sbDate || undefined,
+                    location: sbLocation,
+                    units: sbUnits,
+                    durationDays: sbDuration,
+                    capacityPerDay: sbCapacity,
+                    bookingsHistory: history,
+                  }
+                });
+                if (!resp.ok) {
+                  let detail = '';
+                  try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+                  throw new Error(`Smart suggestion failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+                }
+                const data = await resp.json();
+                setSbSuggestion(data?.suggestion || null);
+                setSbAlternatives(data?.alternatives || null);
+              } catch (e: any) {
+                setSbError(e?.message || 'Failed to get suggestion');
+              } finally {
+                setSbLoading(false);
+              }
+            };
+          // ...existing code...          // ...existing code...
+            const smartSuggest = async () => {
+              setSbLoading(true);
+              setSbError(null);
+              setSbSuggestion(null);
+              setSbAlternatives(null);
+              try {
+                const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
+                // NEW CODE: Cleaner, using the 'data' parameter
+                const resp = await apiFetch('/api/ai/smart-booking/suggest', {
+                  method: 'POST',
+                  data: { // This object is automatically stringified and headers are set!
+                    date: sbDate || undefined,
+                    location: sbLocation,
+                    units: sbUnits,
+                    durationDays: sbDuration,
+                    capacityPerDay: sbCapacity,
+                    bookingsHistory: history,
+                  }
+                });
+                if (!resp.ok) {
+                  let detail = '';
+                  try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+                  throw new Error(`Smart suggestion failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
+                }
+                const data = await resp.json();
+                setSbSuggestion(data?.suggestion || null);
+                setSbAlternatives(data?.alternatives || null);
+              } catch (e: any) {
+                setSbError(e?.message || 'Failed to get suggestion');
+              } finally {
+                setSbLoading(false);
+              }
+            };
+          // ...existing code...
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <Clock className="w-5 h-5 text-gray-400 mr-3" />
