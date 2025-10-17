@@ -3,6 +3,8 @@ const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const nodemailer = require('nodemailer');
+const cron = require('node-cron');
 
 const app = express();
 app.use(cors());
@@ -16,10 +18,13 @@ const Forecast = require('./forecast');
 // Environment-gated safety switches and HTTP settings
 // ------------------------------
 const ENABLE_FORECAST_API = process.env.ENABLE_FORECAST_API !== 'false'; // default on
-const ENABLE_WEATHER_CACHE = process.env.ENABLE_WEATHER_CACHE === 'true'; // default off
+const ENABLE_WEATHER_CACHE = process.env.Enable_WEATHER_CACHE === 'true' || process.env.ENABLE_WEATHER_CACHE === 'true'; // default off (support typo)
 const WEATHER_CACHE_TTL_S = Number(process.env.WEATHER_CACHE_TTL_S || 600); // 10 minutes default
 const HTTP_TIMEOUT_MS = Number(process.env.HTTP_TIMEOUT_MS || 8000);
 const ENABLE_ANALYTICS_API = process.env.ENABLE_ANALYTICS_API === 'true'; // default off
+const ENABLE_ROI_API = process.env.ENABLE_ROI_API !== 'false'; // default on
+const ENABLE_WEEKLY_REPORTS = process.env.ENABLE_WEEKLY_REPORTS === 'true'; // default off
+const WEEKLY_REPORT_CRON = process.env.WEEKLY_REPORT_CRON || '0 8 * * 1'; // 08:00 every Monday
 
 // Apply axios default timeout
 axios.defaults.timeout = HTTP_TIMEOUT_MS;

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { Lock, User, Eye, EyeOff } from 'lucide-react';
+import { trackNow } from './lib/analytics';
 
 
 const Login = () => {
@@ -24,6 +25,8 @@ const Login = () => {
     const p = password.trim().toLowerCase();
     if (u === 'admin' && p === 'admin') {
       login();
+      // Analytics: login success
+      trackNow('login_success');
       // navigate immediately to ensure redirect
       navigate('/dashboard');
     } else {

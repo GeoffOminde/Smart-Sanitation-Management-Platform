@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from './lib/api';
 import { Cloud, Sun, Wind, Droplets, BarChart3, Navigation, Wrench } from 'lucide-react';
+import { track, trackNow } from './lib/analytics';
 
 const defaultCity = 'Nairobi';
 
@@ -16,6 +17,7 @@ const Insights = () => {
     setWLoading(true);
     setWError(null);
     try {
+      track('weather_refresh_clicked', { city: selectedCity });
       const resp = await apiFetch(`/api/weather/current?city=${encodeURIComponent(selectedCity)}`);
       if (!resp.ok) {
         let detail = '';
@@ -24,10 +26,12 @@ const Insights = () => {
       }
       const data = await resp.json();
       setWeather(data);
+      track('weather_loaded', { city: selectedCity });
     } catch (e: any) {
       setWError(e?.message || 'Failed to fetch weather');
       setWeather(null);
       console.error('[Insights] weather error', e);
+      track('weather_error', { city: selectedCity });
     } finally {
       setWLoading(false);
     }
@@ -83,6 +87,7 @@ const Insights = () => {
     setFcError(null);
     setFcResult(null);
     try {
+      track('forecast_run_clicked', { capacity });
       const resp = await apiFetch('/api/ai/forecast-bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,9 +100,11 @@ const Insights = () => {
       }
       const data = await resp.json();
       setFcResult(data);
+      track('forecast_run_success', { utilization: data?.utilization, avg: data?.summary?.avgDailyForecast });
     } catch (e: any) {
       setFcError(e?.message || 'Failed to forecast demand');
       console.error('[Insights] forecast error', e);
+      track('forecast_run_error');
     } finally {
       setFcLoading(false);
     }
@@ -106,6 +113,7 @@ const Insights = () => {
   // Text analysis removed
 
   useEffect(() => {
+    trackNow('view_insights');
     fetchWeather(city);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -136,6 +144,7 @@ const Insights = () => {
     setPmError(null);
     setPmResults(null);
     try {
+      track('pm_run_clicked');
       const resp = await apiFetch('/api/ai/predict-maintenance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,9 +157,11 @@ const Insights = () => {
       }
       const data = await resp.json();
       setPmResults(data?.results || []);
+      track('pm_run_success', { count: (data?.results || []).length });
     } catch (e: any) {
       setPmError(e?.message || 'Failed to run predictive maintenance');
       console.error('[Insights] pm error', e);
+      track('pm_run_error');
     } finally {
       setPmLoading(false);
     }
@@ -170,6 +181,7 @@ const Insights = () => {
         priority: r.risk || 'medium',
       }));
 
+      track('route_optimize_clicked', { stops: stopsSource.length });
       const resp = await apiFetch('/api/ai/route-optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -182,9 +194,11 @@ const Insights = () => {
       }
       const data = await resp.json();
       setRouteResult(data);
+      track('route_optimize_success', { totalKm: data?.totalDistanceKm, stops: data?.orderedStops?.length });
     } catch (e: any) {
       setRouteError(e?.message || 'Failed to optimize route');
       console.error('[Insights] route error', e);
+      track('route_optimize_error');
     } finally {
       setRouteLoading(false);
     }

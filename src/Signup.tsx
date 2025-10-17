@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Lock, User, Mail, Eye, EyeOff } from 'lucide-react';
+import { trackNow } from './lib/analytics';
 
 const Signup: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -21,6 +22,7 @@ const Signup: React.FC = () => {
 
     // Demo-only: In a real app, send this to the backend and handle errors.
     // For now, redirect to login page.
+    trackNow('signup_completed');
     navigate('/login');
   };
 
