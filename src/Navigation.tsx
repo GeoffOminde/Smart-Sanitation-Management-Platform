@@ -63,11 +63,60 @@ const Navigation = () => {
             </Link>
           </div>
           <div className="flex items-center space-x-4">
-            <Link to="/value" className="px-2 py-1 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded" title="Value & ROI">
-              Value
-            </Link>
+            <div className="relative group" ref={menuRef}>
+              <button
+                onClick={() => setOpen(!open)}
+                className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors duration-200"
+                aria-haspopup="true"
+                aria-expanded={open}
+              >
+                Value
+                <svg 
+                  className={`ml-1 h-4 w-4 text-gray-500 transition-transform duration-200 ${open ? 'transform rotate-180' : ''}`} 
+                  fill="none" 
+                  viewBox="0 0 24 24" 
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              <div 
+                className={`absolute right-0 mt-1 w-56 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50 ${open ? 'block' : 'hidden'}`}
+                role="menu"
+                aria-orientation="vertical"
+                aria-labelledby="value-menu"
+              >
+                <div className="py-1" role="none">
+                  <Link
+                    to="/value/roi"
+                    className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100"
+                    role="menuitem"
+                    onClick={() => setOpen(false)}
+                  >
+                    ROI Calculator
+                  </Link>
+                  <Link
+                    to="/value/savings"
+                    className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100"
+                    role="menuitem"
+                    onClick={() => setOpen(false)}
+                  >
+                    Cost Savings
+                  </Link>
+                  <Link
+                    to="/value/reports"
+                    className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100"
+                    role="menuitem"
+                    onClick={() => setOpen(false)}
+                  >
+                    Reports
+                  </Link>
+                </div>
+              </div>
+            </div>
 
-            <div className="relative" ref={menuRef}>
+            <div className="relative">
               <button
                 aria-expanded={open}
                 onClick={() => setOpen((v) => !v)}
