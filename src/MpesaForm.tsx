@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiFetch } from './lib/api';
 
 const MpesaForm = () => {
   const [phone, setPhone] = useState('');
@@ -9,18 +10,23 @@ const MpesaForm = () => {
     e.preventDefault();
     if (!phone || amount <= 0) return setMessage('Please provide valid phone number and amount');
 
-    setMessage('Initiating STK Push (demo)...');
-
-    // In production: call your backend endpoint which performs the Lipa na M-Pesa STK Push using Safaricom APIs
-    // Example (client -> backend): POST /api/mpesa/stk with { phone, amount }
-    // Backend responds with success/failure.
+    setMessage('Initiating STK Push...');
 
     try {
-      // Demo: simulate delay
-      await new Promise(res => setTimeout(res, 1200));
-      setMessage('STK Push simulated — in production your backend would initiate the request');
-    } catch (err) {
-      setMessage('Failed to initiate STK Push');
+      const resp = await apiFetch('/api/mpesa/stk', {
+        method: 'POST',
+        data: { phone, amount }
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || 'STK Push failed');
+      }
+
+      const data = await resp.json();
+      setMessage(`STK Push initiated! Check your phone. CheckoutRequestID: ${data.CheckoutRequestID || 'N/A'}`);
+    } catch (err: any) {
+      setMessage(`Error: ${err.message || 'Failed to initiate STK Push'}`);
     }
   };
 
