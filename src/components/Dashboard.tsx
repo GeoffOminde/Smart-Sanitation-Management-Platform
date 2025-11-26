@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import PaymentsPage from '../Payments';
 import Insights from '../Insights';
+import Maintenance from './Maintenance';
+import Analytics from './Analytics';
 
 interface Unit {
   id: string;
@@ -692,21 +694,6 @@ const Dashboard: React.FC = () => {
             <option value="Mombasa">Mombasa</option>
             <option value="Kisumu">Kisumu</option>
           </select>
-          <button onClick={smartSuggest} disabled={sbLoading} className="bg-blue-600 text-white rounded px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-50">
-            {sbLoading ? 'Analyzing...' : 'Get Suggestion'}
-          </button>
-        </div>
-        {sbError && <p className="text-red-600 text-sm">{sbError}</p>}
-        {sbSuggestion && (
-          <div className="bg-white p-3 rounded border border-blue-100 mt-2">
-            <p className="text-sm text-gray-800"><strong>Recommendation:</strong> {sbSuggestion.reason}</p>
-            <p className="text-xs text-gray-500 mt-1">Confidence: {Math.round(sbSuggestion.confidence * 100)}%</p>
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
@@ -729,169 +716,129 @@ const Dashboard: React.FC = () => {
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button onClick={() => openEditBooking(b)} className="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                  <button onClick={() => deleteBooking(b.id)} className="text-red-600 hover:text-red-900">Delete</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-
-  const renderMaintenance = () => (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-900">Maintenance Schedule</h2>
-      <div className="bg-white rounded-lg shadow-sm border p-6 text-center text-gray-500">
-        <Wrench className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>Maintenance tracking module coming soon.</p>
-      </div>
-    </div>
-  );
-
-  const renderAnalytics = () => (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-900">Analytics & Reports</h2>
-      <div className="bg-white rounded-lg shadow-sm border p-6 text-center text-gray-500">
-        <BarChart3 className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>Advanced analytics dashboard coming soon.</p>
-      </div>
-    </div>
-  );
-
-  const renderSettings = () => (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Company Settings</h2>
-          <p className="text-sm text-gray-500">Manage your company profile and contact details</p>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
-              <input
-                className="w-full border rounded-md px-3 py-2 text-sm"
-                value={globalSettings.company.companyName}
-                onChange={e => updateSettings({ company: { ...globalSettings.company, companyName: e.target.value } })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
-              <input
-                className="w-full border rounded-md px-3 py-2 text-sm"
-                value={globalSettings.company.contactEmail}
-                onChange={e => updateSettings({ company: { ...globalSettings.company, contactEmail: e.target.value } })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-              <input
-                className="w-full border rounded-md px-3 py-2 text-sm"
-                value={globalSettings.company.phone}
-                onChange={e => updateSettings({ company: { ...globalSettings.company, phone: e.target.value } })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
-              <select
-                className="w-full border rounded-md px-3 py-2 text-sm"
-                value={globalSettings.company.language}
-                onChange={e => updateSettings({ company: { ...globalSettings.company, language: e.target.value } })}
-              >
-                <option value="en">English</option>
-                <option value="sw">Swahili</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Notification Preferences</h2>
-          <p className="text-sm text-gray-500">Choose how you want to be notified</p>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="flex items-center justify-between py-2">
-            <div className="flex items-center">
-              <Mail className="w-5 h-5 text-gray-400 mr-3" />
-              <div>
-                <p className="text-sm font-medium text-gray-900">Email Notifications</p>
-                <p className="text-xs text-gray-500">Receive daily summaries and alerts</p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                    <input
+                      className="w-full border rounded-md px-3 py-2 text-sm"
+                      value={globalSettings.company.companyName}
+                      onChange={e => updateSettings({ company: { ...globalSettings.company, companyName: e.target.value } })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+                    <input
+                      className="w-full border rounded-md px-3 py-2 text-sm"
+                      value={globalSettings.company.contactEmail}
+                      onChange={e => updateSettings({ company: { ...globalSettings.company, contactEmail: e.target.value } })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                    <input
+                      className="w-full border rounded-md px-3 py-2 text-sm"
+                      value={globalSettings.company.phone}
+                      onChange={e => updateSettings({ company: { ...globalSettings.company, phone: e.target.value } })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
+                    <select
+                      className="w-full border rounded-md px-3 py-2 text-sm"
+                      value={globalSettings.company.language}
+                      onChange={e => updateSettings({ company: { ...globalSettings.company, language: e.target.value } })}
+                    >
+                      <option value="en">English</option>
+                      <option value="sw">Swahili</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                className="sr-only peer"
-                checked={globalSettings.notifications.emailNotifications}
-                onChange={e => updateSettings({ notifications: { ...globalSettings.notifications, emailNotifications: e.target.checked } })}
-              />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <div className="flex items-center">
-              <MessageSquare className="w-5 h-5 text-gray-400 mr-3" />
-              <div>
-                <p className="text-sm font-medium text-gray-900">WhatsApp Alerts</p>
-                <p className="text-xs text-gray-500">Get instant alerts for critical events</p>
-              </div>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                className="sr-only peer"
-                checked={globalSettings.notifications.whatsappNotifications}
-                onChange={e => updateSettings({ notifications: { ...globalSettings.notifications, whatsappNotifications: e.target.checked } })}
-              />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
-          </div>
-        </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <div className="p-6 border-b flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Team Management</h2>
-            <p className="text-sm text-gray-500">Manage access and roles</p>
+        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+          <div className="p-6 border-b">
+            <h2 className="text-lg font-semibold text-gray-900">Notification Preferences</h2>
+            <p className="text-sm text-gray-500">Choose how you want to be notified</p>
           </div>
-          <button onClick={openAddMember} className="text-sm bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center">
-            <Plus className="w-4 h-4 mr-2" /> Add Member
-          </button>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {globalSettings.teamMembers.map(member => (
-            <div key={member.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between py-2">
               <div className="flex items-center">
-                <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold mr-4">
-                  {member.name.charAt(0)}
-                </div>
+                <Mail className="w-5 h-5 text-gray-400 mr-3" />
                 <div>
-                  <p className="text-sm font-medium text-gray-900">{member.name}</p>
-                  <p className="text-xs text-gray-500">{member.role} • {member.email}</p>
+                  <p className="text-sm font-medium text-gray-900">Email Notifications</p>
+                  <p className="text-xs text-gray-500">Receive daily summaries and alerts</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className={`px-2 py-1 text-xs rounded-full ${member.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                  {member.status}
-                </span>
-                <button onClick={() => openEditMember(member)} className="p-1 text-gray-400 hover:text-blue-600">
-                  <Edit className="w-4 h-4" />
-                </button>
-                <button onClick={() => deleteMember(member.id)} className="p-1 text-gray-400 hover:text-red-600">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={globalSettings.notifications.emailNotifications}
+                  onChange={e => updateSettings({ notifications: { ...globalSettings.notifications, emailNotifications: e.target.checked } })}
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
             </div>
-          ))}
+            <div className="flex items-center justify-between py-2">
+              <div className="flex items-center">
+                <MessageSquare className="w-5 h-5 text-gray-400 mr-3" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">WhatsApp Alerts</p>
+                  <p className="text-xs text-gray-500">Get instant alerts for critical events</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={globalSettings.notifications.whatsappNotifications}
+                  onChange={e => updateSettings({ notifications: { ...globalSettings.notifications, whatsappNotifications: e.target.checked } })}
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+          <div className="p-6 border-b flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Team Management</h2>
+              <p className="text-sm text-gray-500">Manage access and roles</p>
+            </div>
+            <button onClick={openAddMember} className="text-sm bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center">
+              <Plus className="w-4 h-4 mr-2" /> Add Member
+            </button>
+          </div>
+          <div className="divide-y divide-gray-200">
+            {globalSettings.teamMembers.map(member => (
+              <div key={member.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
+                <div className="flex items-center">
+                  <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold mr-4">
+                    {member.name.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{member.name}</p>
+                    <p className="text-xs text-gray-500">{member.role} • {member.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 text-xs rounded-full ${member.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                    {member.status}
+                  </span>
+                  <button onClick={() => openEditMember(member)} className="p-1 text-gray-400 hover:text-blue-600">
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => deleteMember(member.id)} className="p-1 text-gray-400 hover:text-red-600">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  );
+      );
 
   const renderContent = () => {
     switch (activeTab) {
@@ -908,99 +855,99 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Global modals */}
-      {memberModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h4 className="text-md font-semibold text-gray-900">{editingMemberId ? 'Edit Member' : 'Add Member'}</h4>
-              <button className="text-gray-500" onClick={() => setMemberModalOpen(false)}>×</button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberName} onChange={e => setFormMemberName(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberRole} onChange={e => setFormMemberRole(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input type="email" className="w-full border rounded px-3 py-2 text-sm" value={formMemberEmail} onChange={e => setFormMemberEmail(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberPhone} onChange={e => setFormMemberPhone(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select className="w-full border rounded px-3 py-2 text-sm" value={formMemberStatus} onChange={e => setFormMemberStatus(e.target.value as any)}>
-                    <option value="active">active</option>
-                    <option value="inactive">inactive</option>
-                  </select>
+      return (
+      <div className="min-h-screen bg-gray-50">
+        {/* Global modals */}
+        {memberModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+            <div className="bg-white w-full max-w-lg rounded-lg shadow-lg">
+              <div className="p-4 border-b flex items-center justify-between">
+                <h4 className="text-md font-semibold text-gray-900">{editingMemberId ? 'Edit Member' : 'Add Member'}</h4>
+                <button className="text-gray-500" onClick={() => setMemberModalOpen(false)}>×</button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberName} onChange={e => setFormMemberName(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberRole} onChange={e => setFormMemberRole(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input type="email" className="w-full border rounded px-3 py-2 text-sm" value={formMemberEmail} onChange={e => setFormMemberEmail(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                    <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberPhone} onChange={e => setFormMemberPhone(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select className="w-full border rounded px-3 py-2 text-sm" value={formMemberStatus} onChange={e => setFormMemberStatus(e.target.value as any)}>
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                    </select>
+                  </div>
                 </div>
               </div>
+              <div className="p-4 border-t flex items-center justify-end gap-2">
+                <button className="px-4 py-2 text-sm border rounded-md" onClick={() => setMemberModalOpen(false)}>Cancel</button>
+                <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={saveMember}>Save</button>
+              </div>
             </div>
-            <div className="p-4 border-t flex items-center justify-end gap-2">
-              <button className="px-4 py-2 text-sm border rounded-md" onClick={() => setMemberModalOpen(false)}>Cancel</button>
-              <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={saveMember}>Save</button>
+          </div>
+        )}
+
+        {/* Content area only: top navigation is provided by ProtectedLayout */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex items-center justify-end mb-4">
+          </div>
+          <div className="flex flex-col lg:flex-row gap-8">
+            {/* Sidebar */}
+            <div className="w-full lg:w-64 flex-shrink-0">
+              <nav className="bg-white rounded-lg shadow-sm border p-4">
+                <ul className="space-y-2">
+                  {[
+                    { id: 'overview', label: 'Overview', icon: BarChart3 },
+                    { id: 'fleet', label: 'Fleet Map', icon: MapPin },
+                    { id: 'routes', label: 'Routes', icon: Navigation },
+                    { id: 'payments', label: 'Payments', icon: CreditCard },
+                    { id: 'insights', label: 'Insights', icon: BarChart3 },
+                    { id: 'bookings', label: 'Bookings', icon: Calendar },
+                    { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+                    { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+                    { id: 'settings', label: 'Settings', icon: Settings },
+                  ].map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <li key={item.id}>
+                        <button
+                          onClick={() => setActiveTab(item.id)}
+                          className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === item.id
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                            }`}
+                        >
+                          <Icon className="w-4 h-4 mr-3" />
+                          {item.label}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
+            </div>
+
+            {/* Main Content */}
+            <div className="flex-1">
+              {renderContent()}
             </div>
           </div>
         </div>
-      )}
-
-      {/* Content area only: top navigation is provided by ProtectedLayout */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex items-center justify-end mb-4">
-        </div>
-        <div className="flex flex-col lg:flex-row gap-8">
-          {/* Sidebar */}
-          <div className="w-full lg:w-64 flex-shrink-0">
-            <nav className="bg-white rounded-lg shadow-sm border p-4">
-              <ul className="space-y-2">
-                {[
-                  { id: 'overview', label: 'Overview', icon: BarChart3 },
-                  { id: 'fleet', label: 'Fleet Map', icon: MapPin },
-                  { id: 'routes', label: 'Routes', icon: Navigation },
-                  { id: 'payments', label: 'Payments', icon: CreditCard },
-                  { id: 'insights', label: 'Insights', icon: BarChart3 },
-                  { id: 'bookings', label: 'Bookings', icon: Calendar },
-                  { id: 'maintenance', label: 'Maintenance', icon: Wrench },
-                  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
-                  { id: 'settings', label: 'Settings', icon: Settings },
-                ].map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.id}>
-                      <button
-                        onClick={() => setActiveTab(item.id)}
-                        className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === item.id
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                          }`}
-                      >
-                        <Icon className="w-4 h-4 mr-3" />
-                        {item.label}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </nav>
-          </div>
-
-          {/* Main Content */}
-          <div className="flex-1">
-            {renderContent()}
-          </div>
-        </div>
-      </div>
-    </div >
-  );
+      </div >
+      );
 };
 
-export default Dashboard;
+      export default Dashboard;
