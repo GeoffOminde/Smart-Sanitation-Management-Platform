@@ -1,25 +1,20 @@
-// seed.js
-// Simple seed script to populate demo data using Prisma
-
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function main() {
-    // Create a demo admin user
     const adminUser = await prisma.user.upsert({
         where: { email: 'admin@example.com' },
         update: {},
         create: {
             email: 'admin@example.com',
-            password: await bcrypt.hash('admin123', 10), // hashed password for demo
+            password: await bcrypt.hash('admin123', 10),
             name: 'Admin User',
             role: 'admin',
         },
     });
     console.log('Created admin user:', adminUser);
 
-    // Create a demo unit
     const unit = await prisma.unit.create({
         data: {
             serialNo: 'UNIT-001',
@@ -31,7 +26,6 @@ async function main() {
     });
     console.log('Created unit:', unit);
 
-    // Create a demo booking
     const booking = await prisma.booking.create({
         data: {
             customerId: adminUser.id,
@@ -44,7 +38,6 @@ async function main() {
     });
     console.log('Created booking:', booking);
 
-    // Create a demo transaction
     const transaction = await prisma.transaction.create({
         data: {
             provider: 'paystack',
@@ -55,7 +48,6 @@ async function main() {
     });
     console.log('Created transaction:', transaction);
 
-    // Create a demo maintenance log for the unit
     const maintenanceLog = await prisma.maintenanceLog.create({
         data: {
             unitId: unit.id,

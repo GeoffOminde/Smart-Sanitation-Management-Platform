@@ -14,7 +14,7 @@ const PayPalForm = () => {
     setMessage('Redirecting to PayPal (demo)...');
     try {
       await new Promise((res) => setTimeout(res, 800));
-      setMessage('PayPal flow simulated — integrate PayPal SDK/Checkout for production');
+      setMessage('PayPal integration is coming soon!');
     } catch (err) {
       setMessage('PayPal checkout failed');
     }

@@ -5,8 +5,10 @@ import PayPalForm from './PayPalForm';
 import { useEffect, useState } from 'react';
 import { apiFetch } from './lib/api';
 import { CreditCard, DollarSign, TrendingUp } from 'lucide-react';
+import { useAppNotifications } from './hooks/useAppNotifications';
 
 const Payments = () => {
+  const { notifyPaymentReceived, addNotification } = useAppNotifications();
   const [connected, setConnected] = useState<boolean | null>(null);
   const [txs, setTxs] = useState<any[]>([]);
 
@@ -15,7 +17,19 @@ const Payments = () => {
       const resp = await apiFetch('/api/admin/transactions');
       if (!resp.ok) throw new Error('bad');
       const data = await resp.json();
-      setTxs(data.transactions || []);
+      const newTxs = data.transactions || [];
+
+      // Notify if new transactions detected
+      if (txs.length > 0 && newTxs.length > txs.length) {
+        const newCount = newTxs.length - txs.length;
+        addNotification(
+          'New Transactions',
+          `${newCount} new transaction${newCount > 1 ? 's' : ''} received.`,
+          'success'
+        );
+      }
+
+      setTxs(newTxs);
       setConnected(true);
     } catch (err) {
       setConnected(false);
@@ -73,7 +87,7 @@ const Payments = () => {
             </div>
           </div>
 
-          
+
         </div>
 
         {/* Methods Grid */}
@@ -107,7 +121,7 @@ const Payments = () => {
                     if (resp.ok) {
                       await checkBackend();
                     }
-                  } catch {}
+                  } catch { }
                 }}
                 disabled={!connected}
                 title={!connected ? 'Backend offline' : ''}
@@ -136,7 +150,7 @@ const Payments = () => {
                           if (resp.ok) {
                             setTxs(prev => prev.filter(x => x.id !== t.id));
                           }
-                        } catch {}
+                        } catch { }
                       }}
                       title="Delete"
                     >

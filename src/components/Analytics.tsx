@@ -1,183 +1,163 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { useBookings } from '../contexts/BookingContext';
-import { useUnits } from '../contexts/UnitContext';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
+import { apiFetch } from '../lib/api';
+import {
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    BarElement,
+    Title,
+    Tooltip,
+    Legend,
+    ArcElement,
+} from 'chart.js';
+import { Line, Bar, Doughnut } from 'react-chartjs-2';
+import { TrendingUp, Users, Wrench, DollarSign } from 'lucide-react';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    BarElement,
+    Title,
+    Tooltip,
+    Legend,
+    ArcElement
+);
 
 const Analytics = () => {
-  const { bookings } = useBookings();
-  const { units } = useUnits();
+    const [data, setData] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
 
-  // Booking status data
-  const bookingStatusData = useMemo(() => {
-    const statusCount = bookings.reduce((acc, booking) => {
-      acc[booking.status] = (acc[booking.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const resp = await apiFetch('/api/analytics/dashboard');
+                if (resp.ok) {
+                    const json = await resp.json();
+                    setData(json);
+                }
+            } catch (err) {
+                console.error('Failed to fetch analytics', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
 
-    return Object.entries(statusCount).map(([name, count]) => ({
-      name,
-      count,
-      percentage: Math.round((count / bookings.length) * 100) || 0
-    }));
-  }, [bookings]);
+    if (loading) return <div className="p-8 text-center text-gray-500">Loading analytics...</div>;
+    if (!data) return <div className="p-8 text-center text-red-500">Failed to load analytics data.</div>;
 
-  // Unit status data
-  const unitStatusData = useMemo(() => {
-    const statusCount = units.reduce((acc, unit) => {
-      acc[unit.status] = (acc[unit.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const revenueChart = {
+        labels: data.revenue.labels,
+        datasets: [
+            {
+                label: 'Revenue (KES)',
+                data: data.revenue.data,
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                tension: 0.3,
+            },
+        ],
+    };
 
-    return Object.entries(statusCount).map(([name, value]) => ({
-      name,
-      value,
-      percentage: Math.round((value / units.length) * 100) || 0
-    }));
-  }, [units]);
+    const bookingChart = {
+        labels: ['Confirmed', 'Pending', 'Cancelled'],
+        datasets: [
+            {
+                label: '# of Bookings',
+                data: [data.bookings.confirmed, data.bookings.pending, data.bookings.cancelled],
+                backgroundColor: [
+                    'rgba(75, 192, 192, 0.6)',
+                    'rgba(255, 206, 86, 0.6)',
+                    'rgba(255, 99, 132, 0.6)',
+                ],
+                borderWidth: 1,
+            },
+        ],
+    };
 
-  // Revenue data (example)
-  const revenueData = useMemo(() => {
-    const monthlyRevenue: Record<string, number> = {};
-    
-    bookings.forEach(booking => {
-      if (booking.paymentStatus === 'paid') {
-        const date = new Date(booking.date);
-        const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        monthlyRevenue[monthYear] = (monthlyRevenue[monthYear] || 0) + (booking.amount || 0);
-      }
-    });
+    const maintenanceChart = {
+        labels: ['Completed', 'Pending'],
+        datasets: [
+            {
+                label: 'Maintenance Tasks',
+                data: [data.maintenance.completed, data.maintenance.pending],
+                backgroundColor: [
+                    'rgba(54, 162, 235, 0.6)',
+                    'rgba(255, 159, 64, 0.6)',
+                ],
+                borderWidth: 1,
+            },
+        ],
+    };
 
-    return Object.entries(monthlyRevenue).map(([month, revenue]) => ({
-      month,
-      revenue: Math.round(revenue * 100) / 100 // Round to 2 decimal places
-    })).sort((a, b) => a.month.localeCompare(b.month));
-  }, [bookings]);
+    return (
+        <div className="space-y-6">
+            <h2 className="text-xl font-bold text-gray-900">Advanced Analytics</h2>
 
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Analytics Dashboard</h2>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Bookings Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Bookings by Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={bookingStatusData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="count"
-                    label={({ name, percentage }) => `${name}: ${percentage}%`}
-                  >
-                    {bookingStatusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value, name, props) => [`${value} (${props.payload.percentage}%)`, name]} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
+                    <div className="p-3 bg-green-100 rounded-full mr-4">
+                        <DollarSign className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-500">Total Revenue</p>
+                        <p className="text-xl font-bold">KES {data.revenue.data.reduce((a: any, b: any) => a + b, 0).toLocaleString()}</p>
+                    </div>
+                </div>
+                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
+                    <div className="p-3 bg-blue-100 rounded-full mr-4">
+                        <Users className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-500">Total Bookings</p>
+                        <p className="text-xl font-bold">{data.bookings.confirmed + data.bookings.pending + data.bookings.cancelled}</p>
+                    </div>
+                </div>
+                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
+                    <div className="p-3 bg-orange-100 rounded-full mr-4">
+                        <Wrench className="w-6 h-6 text-orange-600" />
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-500">Pending Maintenance</p>
+                        <p className="text-xl font-bold">{data.maintenance.pending}</p>
+                    </div>
+                </div>
+                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
+                    <div className="p-3 bg-purple-100 rounded-full mr-4">
+                        <TrendingUp className="w-6 h-6 text-purple-600" />
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-500">Growth</p>
+                        <p className="text-xl font-bold">+12%</p>
+                    </div>
+                </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Unit Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Units by Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={unitStatusData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip formatter={(value, name, props) => [`${value} (${props.payload.percentage}%)`, name]} />
-                  <Legend />
-                  <Bar dataKey="value" fill="#8884d8">
-                    {unitStatusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-6 rounded-lg shadow border">
+                    <h3 className="text-lg font-semibold mb-4">Revenue Trend</h3>
+                    <Line options={{ responsive: true, plugins: { legend: { position: 'top' as const } } }} data={revenueChart} />
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow border">
+                    <h3 className="text-lg font-semibold mb-4">Booking Status</h3>
+                    <Bar options={{ responsive: true, plugins: { legend: { position: 'top' as const } } }} data={bookingChart} />
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow border">
+                    <h3 className="text-lg font-semibold mb-4">Maintenance Overview</h3>
+                    <div className="h-64 flex justify-center">
+                        <Doughnut data={maintenanceChart} />
+                    </div>
+                </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Revenue */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Revenue</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={revenueData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip formatter={(value) => [`KSh ${value}`, 'Revenue']} />
-                  <Legend />
-                  <Bar dataKey="revenue" fill="#82ca9d" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Additional metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Bookings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{bookings.length}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader>
-            <CardTitle>Active Units</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              {units.filter(unit => unit.status === 'active').length}
-              <span className="text-sm text-gray-500 ml-2">of {units.length}</span>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Revenue</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              KSh {bookings
-                .filter(b => b.paymentStatus === 'paid')
-                .reduce((sum, booking) => sum + (booking.amount || 0), 0)
-                .toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
+        </div>
+    );
 };
 
 export default Analytics;

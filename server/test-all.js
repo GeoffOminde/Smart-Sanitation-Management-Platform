@@ -1,4 +1,3 @@
-// Updated test script to use JWT auth for protected admin routes
 const axios = require('axios');
 const base = 'http://localhost:3001';
 let authToken = '';
@@ -8,12 +7,12 @@ async function login() {
     try {
         const resp = await axios.post(`${base}/api/auth/login`, {
             email: 'admin@example.com',
-            password: 'admin123' // using seeded admin user password (plain for demo)
+            password: 'admin123'
         });
         authToken = resp.data.token;
         console.log('Obtained token');
     } catch (err) {
-        console.error('Login error (maybe user not registered):', err.response?.data || err.message);
+        console.error('Login error:', err.response?.data || err.message);
     }
 }
 
@@ -25,7 +24,6 @@ async function testPaystack() {
             amount: 10.5
         });
         console.log('Paystack init response status:', resp.status);
-        console.log('Data:', resp.data);
     } catch (err) {
         console.error('Paystack init error:', err.response?.data || err.message);
     }
@@ -38,7 +36,6 @@ async function listTransactions() {
             headers: { Authorization: `Bearer ${authToken}` }
         });
         console.log('Transactions count:', resp.data.transactions.length);
-        console.log('Transactions:', resp.data.transactions);
         return resp.data.transactions;
     } catch (err) {
         console.error('List transactions error:', err.response?.data || err.message);
@@ -70,14 +67,43 @@ async function deleteTransaction(id) {
     }
 }
 
+async function testBroadcast() {
+    console.log('Testing WS Broadcast...');
+    try {
+        const resp = await axios.post(`${base}/api/ws/broadcast`, {
+            message: 'Hello from test script'
+        }, {
+            headers: { Authorization: `Bearer ${authToken}` }
+        });
+        console.log('Broadcast response:', resp.data);
+    } catch (err) {
+        console.error('Broadcast error:', err.response?.data || err.message);
+    }
+}
+
+async function testAnalytics() {
+    console.log('Testing Analytics Ingestion...');
+    try {
+        const resp = await axios.post(`${base}/api/analytics/events`, {
+            events: [{ name: 'test_event', ts: Date.now() }]
+        });
+        console.log('Analytics response:', resp.data);
+    } catch (err) {
+        console.error('Analytics error:', err.response?.data || err.message);
+    }
+}
+
 (async () => {
     await login();
-    await testPaystack();
-    await listTransactions();
-    await seedTransactions();
-    const txs = await listTransactions();
-    if (txs.length > 0) {
-        await deleteTransaction(txs[0].id);
+    if (authToken) {
+        await testPaystack();
         await listTransactions();
+        await seedTransactions();
+        const txs = await listTransactions();
+        if (txs.length > 0) {
+            await deleteTransaction(txs[0].id);
+        }
+        await testBroadcast();
+        await testAnalytics();
     }
 })();
