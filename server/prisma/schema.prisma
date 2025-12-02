@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Will store hashed passwords
+  name      String
+  role      String   // admin, manager, technician, customer
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  provider  String   // paystack, mpesa
+  email     String?
+  phone     String?
+  amount    Float
+  status    String   // success, pending, failed
+  metadata  String?  // JSON string for additional data
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Booking {
+  id         String   @id @default(uuid())
+  customerId String
+  location   String
+  units      Int
+  date       DateTime
+  duration   Int      // in days
+  status     String   // pending, confirmed, completed, cancelled
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Unit {
+  id             String   @id @default(uuid())
+  serialNo       String   @unique
+  location       String
+  fillLevel      Int      // 0-100
+  batteryLevel   Int      // 0-100
+  status         String   // active, maintenance, offline
+  lastSeen       DateTime @default(now())
+  coordinates    String?  // JSON string for lat/lng
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  maintenanceLogs MaintenanceLog[]
+}
+
+model MaintenanceLog {
+  id            String    @id @default(uuid())
+  unitId        String
+  unit          Unit      @relation(fields: [unitId], references: [id])
+  type          String    // routine, repair, emergency
+  description   String
+  scheduledDate DateTime
+  completedDate DateTime?
+  technicianId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiFetch } from '../lib/api';
-import { 
-  MapPin, 
-  Truck, 
-  Calendar, 
-  Settings, 
-  AlertTriangle, 
-  Battery, 
-  Users, 
+import {
+  MapPin,
+  Truck,
+  Calendar,
+  Settings,
+  AlertTriangle,
+  Battery,
+  Users,
   DollarSign,
   TrendingUp,
   Clock,
@@ -28,8 +29,18 @@ import {
   Shield,
   Globe
 } from 'lucide-react';
+import { useLocale } from '../contexts/LocaleContext';
+import {
+  ForecastResult,
+  MaintenanceInsight,
+  forecastDemand,
+  generatePrescriptiveAlerts,
+  rankUnitsByMaintenance,
+} from '../lib/heuristics';
 import PaymentsPage from '../Payments';
 import Insights from '../Insights';
+import Maintenance from './Maintenance';
+import Analytics from './Analytics';
 
 interface Unit {
   id: string;
@@ -73,9 +84,59 @@ interface TeamMember {
   joinDate: string;
 }
 
+interface SmartBookingSuggestion {
+  suggestion?: { date: string; utilization: number };
+  alternatives?: { date: string; utilization: number }[];
+}
+
+interface OrderedStop {
+  id: string;
+  serialNo?: string;
+  legDistanceKm?: number;
+}
+
+interface RouteOptimizationResult {
+  totalDistanceKm?: number;
+  orderedStops?: OrderedStop[];
+}
+
+type AnalyticsRange = 'all' | '30' | '60' | '90' | '365';
+type UnitStatus = Unit['status'];
+type RouteStatus = Route['status'];
+type RoutePriority = Route['priority'];
+
 const Dashboard: React.FC = () => {
+  const { locale, setLocale, t } = useLocale();
   const [activeTab, setActiveTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
+  const tabs = useMemo(
+    () => [
+      { key: 'overview', label: t('dashboard.overviewTab') },
+      { key: 'fleet', label: t('dashboard.fleetMap') },
+      { key: 'routes', label: t('dashboard.routesTab') },
+      { key: 'bookings', label: t('dashboard.bookingsTab') },
+      { key: 'maintenance', label: t('dashboard.maintenanceTab') },
+      { key: 'analytics', label: t('dashboard.analyticsTab') },
+      { key: 'insights', label: t('dashboard.insightsTab') },
+      { key: 'payments', label: t('dashboard.paymentsTab') },
+      { key: 'settings', label: t('dashboard.settingsTab') },
+    ],
+    [t]
+  );
+  const sidebarItems = useMemo(
+    () => [
+      { id: 'overview', label: t('dashboard.overviewTab'), icon: BarChart3 },
+      { id: 'fleet', label: t('dashboard.fleetMap'), icon: MapPin },
+      { id: 'routes', label: t('dashboard.routesTab'), icon: Navigation },
+      { id: 'bookings', label: t('dashboard.bookingsTab'), icon: Calendar },
+      { id: 'maintenance', label: t('dashboard.maintenanceTab'), icon: Wrench },
+      { id: 'analytics', label: t('dashboard.analyticsTab'), icon: TrendingUp },
+      { id: 'insights', label: t('dashboard.insightsTab'), icon: BarChart3 },
+      { id: 'payments', label: t('dashboard.paymentsTab'), icon: CreditCard },
+      { id: 'settings', label: t('dashboard.settingsTab'), icon: Settings },
+    ],
+    [t]
+  );
 
   // Smart Booking state
   const [sbDate, setSbDate] = useState<string>('');
@@ -85,8 +146,8 @@ const Dashboard: React.FC = () => {
   const [sbCapacity, setSbCapacity] = useState<number>(80);
   const [sbLoading, setSbLoading] = useState<boolean>(false);
   const [sbError, setSbError] = useState<string | null>(null);
-  const [sbSuggestion, setSbSuggestion] = useState<any | null>(null);
-  const [sbAlternatives, setSbAlternatives] = useState<any[] | null>(null);
+  const [sbSuggestion, setSbSuggestion] = useState<SmartBookingSuggestion | null>(null);
+  const [sbAlternatives, setSbAlternatives] = useState<string[] | null>(null);
 
   const smartSuggest = async () => {
     setSbLoading(true);
@@ -95,10 +156,9 @@ const Dashboard: React.FC = () => {
     setSbAlternatives(null);
     try {
       const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
-     // NEW CODE: Cleaner, using the 'data' parameter
       const resp = await apiFetch('/api/ai/smart-booking/suggest', {
         method: 'POST',
-        data: { // This object is automatically stringified and headers are set!
+        data: {
           date: sbDate || undefined,
           location: sbLocation,
           units: sbUnits,
@@ -109,14 +169,14 @@ const Dashboard: React.FC = () => {
       });
       if (!resp.ok) {
         let detail = '';
-        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch {}
+        try { const j = await resp.json(); detail = j?.error || JSON.stringify(j); } catch { }
         throw new Error(`Smart suggestion failed: ${resp.status} ${detail ? `- ${detail}` : ''}`);
       }
       const data = await resp.json();
-      setSbSuggestion(data?.suggestion || null);  
+      setSbSuggestion(data?.suggestion || null);
       setSbAlternatives(data?.alternatives || null);
-    } catch (e: any) {
-      setSbError(e?.message || 'Failed to get suggestion');
+    } catch (error: unknown) {
+      setSbError(error instanceof Error ? error.message : 'Failed to get suggestion');
     } finally {
       setSbLoading(false);
     }
@@ -128,7 +188,6 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     const loadRecommendation = async () => {
       try {
-        // Use existing bookings array (below) to build simple history
         const history = bookings.map(b => ({ date: new Date(b.date).toISOString() }));
         const resp = await apiFetch('/api/ai/forecast-bookings', {
           method: 'POST',
@@ -156,12 +215,12 @@ const Dashboard: React.FC = () => {
     try { const s = localStorage.getItem('units'); return s ? JSON.parse(s) : defaults; } catch { return defaults; }
   });
   useEffect(() => {
-    try { localStorage.setItem('units', JSON.stringify(units)); } catch {}
+    try { localStorage.setItem('units', JSON.stringify(units)); } catch { }
   }, [units]);
 
   const [unitModalOpen, setUnitModalOpen] = useState(false);
   const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
-  const [formUnitStatus, setFormUnitStatus] = useState<'active'|'maintenance'|'offline'>('active');
+  const [formUnitStatus, setFormUnitStatus] = useState<UnitStatus>('active');
   const [formUnitFill, setFormUnitFill] = useState<number>(0);
   const [formUnitBattery, setFormUnitBattery] = useState<number>(0);
   const [formUnitLocation, setFormUnitLocation] = useState<string>('');
@@ -202,7 +261,7 @@ const Dashboard: React.FC = () => {
     }
   });
   useEffect(() => {
-    try { localStorage.setItem('routes', JSON.stringify(routes)); } catch {}
+    try { localStorage.setItem('routes', JSON.stringify(routes)); } catch { }
   }, [routes]);
 
   const [settings, setSettings] = useState<{ companyName: string; contactEmail: string; phone: string; language: string; sessionTimeout: string; emailNotifications: boolean; whatsappNotifications: boolean }>(() => {
@@ -214,15 +273,15 @@ const Dashboard: React.FC = () => {
     }
   });
   useEffect(() => {
-    try { localStorage.setItem('settings', JSON.stringify(settings)); } catch {}
+    try { localStorage.setItem('settings', JSON.stringify(settings)); } catch { }
   }, [settings]);
 
   const [routeModalOpen, setRouteModalOpen] = useState(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [formTech, setFormTech] = useState('');
   const [formRouteUnits, setFormRouteUnits] = useState<number>(1);
-  const [formRouteStatus, setFormRouteStatus] = useState<'pending'|'active'|'completed'>('pending');
-  const [formRoutePriority, setFormRoutePriority] = useState<'high'|'medium'|'low'>('medium');
+  const [formRouteStatus, setFormRouteStatus] = useState<RouteStatus>('pending');
+  const [formRoutePriority, setFormRoutePriority] = useState<RoutePriority>('medium');
   const [formEta, setFormEta] = useState('1.0 hrs');
   const [formUnitId, setFormUnitId] = useState<string>('1');
 
@@ -286,7 +345,7 @@ const Dashboard: React.FC = () => {
     'Karen Depot': [-1.3197, 36.6859],
   };
   const [selectedDepot, setSelectedDepot] = useState<string>('Westlands Depot');
-  const [optResult, setOptResult] = useState<any | null>(null);
+  const [optResult, setOptResult] = useState<RouteOptimizationResult | null>(null);
 
   const optimizeRoutes = async () => {
     try {
@@ -309,8 +368,12 @@ const Dashboard: React.FC = () => {
       if (!resp.ok) throw new Error('optimize failed');
       const data = await resp.json();
       setOptResult(data);
-    } catch (e: any) {
-      alert(e?.message || 'Failed to optimize routes');
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        alert(error.message);
+      } else {
+        alert('Failed to optimize routes');
+      }
     }
   };
 
@@ -320,7 +383,8 @@ const Dashboard: React.FC = () => {
       alert('No optimized order to apply. Please run Optimize Routes first.');
       return;
     }
-    const orderIds: string[] = stops.map((s: any) => s.id);
+    const orderIds: string[] = stops.map((s) => s.id);
+
     setRoutes(prev => {
       const map = new Map(prev.map(r => [r.id, r] as const));
       const ordered = orderIds.map(id => map.get(id)).filter(Boolean) as Route[];
@@ -345,11 +409,23 @@ const Dashboard: React.FC = () => {
     }
   });
   useEffect(() => {
-    try { localStorage.setItem('bookings', JSON.stringify(bookings)); } catch {}
+    try { localStorage.setItem('bookings', JSON.stringify(bookings)); } catch { }
   }, [bookings]);
 
+  const [forecast, setForecast] = useState<ForecastResult | null>(null);
+  const [aiAlerts, setAiAlerts] = useState<string[]>([]);
+  const [topRisks, setTopRisks] = useState<MaintenanceInsight[]>([]);
+
+  useEffect(() => {
+    if (!units.length) return;
+    const result = forecastDemand(bookings, 30, 80);
+    setForecast(result);
+    setAiAlerts(generatePrescriptiveAlerts(units, result));
+    setTopRisks(rankUnitsByMaintenance(units).slice(0, 3));
+  }, [units, bookings]);
+
   // Analytics controls
-  const [analyticsRange, setAnalyticsRange] = useState('all');
+  const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>('all');
   const [analyticsPaidOnly, setAnalyticsPaidOnly] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
@@ -358,8 +434,8 @@ const Dashboard: React.FC = () => {
   const [formDate, setFormDate] = useState('');
   const [formDuration, setFormDuration] = useState('1 day');
   const [formAmount, setFormAmount] = useState<number>(0);
-  const [formStatus, setFormStatus] = useState<'confirmed' | 'pending' | 'cancelled'>('pending');
-  const [formPaymentStatus, setFormPaymentStatus] = useState<'paid' | 'pending' | 'failed'>('pending');
+  const [formStatus, setFormStatus] = useState<Booking['status']>('pending');
+  const [formPaymentStatus, setFormPaymentStatus] = useState<Booking['paymentStatus']>('pending');
 
   const openCreateBooking = () => {
     setEditingBookingId(null);
@@ -426,7 +502,7 @@ const Dashboard: React.FC = () => {
     ];
     try { const s = localStorage.getItem('teamMembers'); return s ? JSON.parse(s) : defaults; } catch { return defaults; }
   });
-  useEffect(() => { try { localStorage.setItem('teamMembers', JSON.stringify(teamMembers)); } catch {} }, [teamMembers]);
+  useEffect(() => { try { localStorage.setItem('teamMembers', JSON.stringify(teamMembers)); } catch { } }, [teamMembers]);
 
   const [memberModalOpen, setMemberModalOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
@@ -434,7 +510,7 @@ const Dashboard: React.FC = () => {
   const [formMemberRole, setFormMemberRole] = useState('');
   const [formMemberEmail, setFormMemberEmail] = useState('');
   const [formMemberPhone, setFormMemberPhone] = useState('');
-  const [formMemberStatus, setFormMemberStatus] = useState<'active'|'inactive'>('active');
+  const [formMemberStatus, setFormMemberStatus] = useState<TeamMember['status']>('active');
 
   const openAddMember = () => {
     setEditingMemberId(null);
@@ -474,7 +550,7 @@ const Dashboard: React.FC = () => {
         email: formMemberEmail.trim() || 'email@example.com',
         phone: formMemberPhone.trim() || '+2547...',
         status: formMemberStatus,
-        joinDate: new Date().toISOString().slice(0,10),
+        joinDate: new Date().toISOString().slice(0, 10),
       };
       setTeamMembers(prev => [newM, ...prev]);
     }
@@ -593,6 +669,71 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* AI Insights */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">AI Insights</h3>
+              <p className="text-sm text-gray-500">
+                {forecast
+                  ? `${forecast?.peakDay} • Avg ${forecast?.avgDailyBookings} bookings/day`
+                  : 'No forecast available'}
+              </p>
+            </div>
+            <span className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 rounded-full">
+              AI
+            </span>
+          </div>
+        </div>
+        <div className="p-6 space-y-4">
+          {forecast && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="border rounded-lg p-4">
+                <p className="text-xs text-gray-500 uppercase">Avg Bookings</p>
+                <p className="text-2xl font-semibold text-gray-900">{forecast.avgDailyBookings}</p>
+                <p className="text-xs text-gray-400">Over the next 30 days</p>
+              </div>
+              <div className="border rounded-lg p-4">
+                <p className="text-xs text-gray-500 uppercase">Capacity Gap</p>
+                <p className="text-2xl font-semibold text-gray-900">{forecast.capacityGap} units</p>
+                <p className="text-xs text-gray-400">{forecast?.suggestion}</p>
+              </div>
+            </div>
+          )}
+          <div>
+            <p className="text-xs font-semibold uppercase text-gray-500">Top Risks</p>
+            <ul className="mt-2 space-y-2 text-sm text-gray-700">
+              {topRisks.length === 0 ? (
+                <li className="text-gray-400">No high-risk units right now.</li>
+              ) : (
+                topRisks.map((item) => (
+                  <li key={item.unit.id} className="flex items-center justify-between">
+                    <span>{item.unit.serialNo}</span>
+                    <span className="text-xs font-semibold text-red-600">{item.risk}%</span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase text-gray-500">AI Alerts</p>
+            <ul className="mt-2 space-y-2 text-sm text-gray-600">
+              {aiAlerts.length === 0 ? (
+                <li className="text-gray-400">No alerts. System operating within thresholds.</li>
+              ) : (
+                aiAlerts.map((alert, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5" />
+                    <span>{alert}</span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+
       {/* Alerts (driven by units state) */}
       <div className="bg-white rounded-lg shadow-sm border">
         <div className="p-6 border-b">
@@ -611,7 +752,7 @@ const Dashboard: React.FC = () => {
                     <p className="text-sm font-medium text-red-800">{`Unit ${u.serialNo} requires immediate servicing`}</p>
                     <p className="text-xs text-red-600">{`Fill level: ${u.fillLevel}% | Location: ${u.location}`}</p>
                   </div>
-                  <button className="text-red-600 hover:text-red-800 text-sm font-medium" onClick={() => { openCreateRoute(); setFormUnitId(u.id); setActiveTab('routes'); }}>
+                  <button className="text-red-600 hover:text-red-800 text-sm font-medium" onClick={() => { openCreateRoute(); if (u.id) setFormUnitId(u.id); setActiveTab('routes'); setUnitModalOpen(false); }}>
                     Assign Route
                   </button>
                 </div>
@@ -645,7 +786,7 @@ const Dashboard: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select className="w-full border rounded px-3 py-2 text-sm" value={formUnitStatus} onChange={e => setFormUnitStatus(e.target.value as any)}>
+                  <select className="w-full border rounded px-3 py-2 text-sm" value={formUnitStatus} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormUnitStatus(e.target.value as UnitStatus)}>
                     <option value="active">active</option>
                     <option value="maintenance">maintenance</option>
                     <option value="offline">offline</option>
@@ -653,21 +794,23 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                  <input className="w-full border rounded px-3 py-2 text-sm" value={formUnitLocation} onChange={e => setFormUnitLocation(e.target.value)} />
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={formUnitLocation} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormUnitLocation(e.target.value)} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Fill Level (%)</label>
-                  <input type="number" min={0} max={100} className="w-full border rounded px-3 py-2 text-sm" value={formUnitFill} onChange={e => setFormUnitFill(Number(e.target.value))} />
+                  <input type="number" min={0} max={100} className="w-full border rounded px-3 py-2 text-sm" value={formUnitFill} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormUnitFill(Number(e.target.value))} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Battery (%)</label>
-                  <input type="number" min={0} max={100} className="w-full border rounded px-3 py-2 text-sm" value={formUnitBattery} onChange={e => setFormUnitBattery(Number(e.target.value))} />
+                  <input type="number" min={0} max={100} className="w-full border rounded px-3 py-2 text-sm" value={formUnitBattery} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormUnitBattery(Number(e.target.value))} />
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="px-3 py-2 text-sm border rounded" onClick={() => { openCreateRoute(); if (activeUnitId) setFormUnitId(activeUnitId); setActiveTab('routes'); setUnitModalOpen(false); }}>Assign Route</button>
+                <button className="px-3 py-2 text-sm border rounded" onClick={() => { openCreateRoute(); if (activeUnitId) setFormUnitId(activeUnitId); setActiveTab('routes'); setUnitModalOpen(false); }}>
+                  Assign Route
+                </button>
                 <button className="px-3 py-2 text-sm border rounded" onClick={() => setFormUnitStatus('maintenance')}>Mark Maintenance</button>
                 <button className="px-3 py-2 text-sm border rounded" onClick={() => setFormUnitStatus('active')}>Mark Active</button>
               </div>
@@ -679,8 +822,6 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
-
-      
 
       {/* Fleet Status */}
       <div className="bg-white rounded-lg shadow-sm border">
@@ -782,7 +923,7 @@ const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Depot Location</label>
-              <select className="w-full border border-gray-300 rounded-md px-3 py-2" value={selectedDepot} onChange={e => setSelectedDepot(e.target.value)}>
+              <select className="w-full border border-gray-300 rounded-md px-3 py-2" value={selectedDepot} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedDepot(e.target.value)}>
                 {Object.keys(depots).map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
@@ -820,7 +961,7 @@ const Dashboard: React.FC = () => {
             <div className="mt-4 border rounded p-4">
               <p className="text-sm text-gray-700 mb-2">Total Distance: <span className="font-medium">{optResult.totalDistanceKm} km</span></p>
               <ol className="list-decimal ml-5 space-y-1 text-sm">
-                {optResult.orderedStops?.map((s: any, idx: number) => (
+                {optResult.orderedStops?.map((s: OrderedStop, idx: number) => (
                   <li key={idx}>{s.serialNo || s.id} • Leg {s.legDistanceKm} km</li>
                 ))}
               </ol>
@@ -846,16 +987,16 @@ const Dashboard: React.FC = () => {
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <input type="number" min={1} className="border rounded px-3 py-2 text-sm" placeholder="# Units" value={formRouteUnits} onChange={e => setFormRouteUnits(Number(e.target.value))} />
-                <input className="border rounded px-3 py-2 text-sm" placeholder="ETA (e.g., 2.5 hrs)" value={formEta} onChange={e => setFormEta(e.target.value)} />
+                <input type="number" min={1} className="border rounded px-3 py-2 text-sm" placeholder="# Units" value={formRouteUnits} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormRouteUnits(Number(e.target.value))} />
+                <input className="border rounded px-3 py-2 text-sm" placeholder="ETA (e.g., 2.5 hrs)" value={formEta} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormEta(e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <select className="border rounded px-3 py-2 text-sm" value={formRouteStatus} onChange={e => setFormRouteStatus(e.target.value as any)}>
+                <select className="border rounded px-3 py-2 text-sm" value={formRouteStatus} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormRouteStatus(e.target.value as RouteStatus)}>
                   <option value="pending">pending</option>
                   <option value="active">active</option>
                   <option value="completed">completed</option>
                 </select>
-                <select className="border rounded px-3 py-2 text-sm" value={formRoutePriority} onChange={e => setFormRoutePriority(e.target.value as any)}>
+                <select className="border rounded px-3 py-2 text-sm" value={formRoutePriority} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormRoutePriority(e.target.value as RoutePriority)}>
                   <option value="high">high</option>
                   <option value="medium">medium</option>
                   <option value="low">low</option>
@@ -863,7 +1004,7 @@ const Dashboard: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Linked Unit</label>
-                <select className="w-full border rounded px-3 py-2 text-sm" value={formUnitId} onChange={e => setFormUnitId(e.target.value)}>
+                <select className="w-full border rounded px-3 py-2 text-sm" value={formUnitId} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormUnitId(e.target.value)}>
                   {units.map(u => (
                     <option key={u.id} value={u.id}>{u.serialNo} • {u.location}</option>
                   ))}
@@ -889,7 +1030,7 @@ const Dashboard: React.FC = () => {
             <div className="flex items-center space-x-2">
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Search bookings..." className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <input type="text" placeholder="Search bookings..." className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm" value={searchTerm} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)} />
               </div>
               <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={openCreateBooking}>
                 <Plus className="w-4 h-4 mr-2 inline" />
@@ -943,18 +1084,18 @@ const Dashboard: React.FC = () => {
                 <button className="text-gray-500" onClick={() => setBookingModalOpen(false)}>×</button>
               </div>
               <div className="p-4 space-y-3">
-                <input className="w-full border rounded px-3 py-2 text-sm" placeholder="Customer" value={formCustomer} onChange={e => setFormCustomer(e.target.value)} />
-                <input className="w-full border rounded px-3 py-2 text-sm" placeholder="Unit" value={formUnit} onChange={e => setFormUnit(e.target.value)} />
-                <input type="date" className="w-full border rounded px-3 py-2 text-sm" value={formDate} onChange={e => setFormDate(e.target.value)} />
-                <input className="w-full border rounded px-3 py-2 text-sm" placeholder="Duration" value={formDuration} onChange={e => setFormDuration(e.target.value)} />
-                <input type="number" min={0} className="w-full border rounded px-3 py-2 text-sm" placeholder="Amount" value={formAmount} onChange={e => setFormAmount(Number(e.target.value))} />
+                <input className="w-full border rounded px-3 py-2 text-sm" placeholder="Customer" value={formCustomer} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormCustomer(e.target.value)} />
+                <input className="w-full border rounded px-3 py-2 text-sm" placeholder="Unit" value={formUnit} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormUnit(e.target.value)} />
+                <input type="date" className="w-full border rounded px-3 py-2 text-sm" value={formDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormDate(e.target.value)} />
+                <input className="w-full border rounded px-3 py-2 text-sm" placeholder="Duration" value={formDuration} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormDuration(e.target.value)} />
+                <input type="number" min={0} className="w-full border rounded px-3 py-2 text-sm" placeholder="Amount" value={formAmount} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormAmount(Number(e.target.value))} />
                 <div className="grid grid-cols-2 gap-3">
-                  <select className="border rounded px-3 py-2 text-sm" value={formStatus} onChange={e => setFormStatus(e.target.value as any)}>
+                  <select className="border rounded px-3 py-2 text-sm" value={formStatus} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormStatus(e.target.value as Booking['status'])}>
                     <option value="confirmed">confirmed</option>
                     <option value="pending">pending</option>
                     <option value="cancelled">cancelled</option>
                   </select>
-                  <select className="border rounded px-3 py-2 text-sm" value={formPaymentStatus} onChange={e => setFormPaymentStatus(e.target.value as any)}>
+                  <select className="border rounded px-3 py-2 text-sm" value={formPaymentStatus} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormPaymentStatus(e.target.value as Booking['paymentStatus'])}>
                     <option value="paid">paid</option>
                     <option value="pending">pending</option>
                     <option value="failed">failed</option>
@@ -1033,33 +1174,10 @@ const Dashboard: React.FC = () => {
     </div>
   );
 
-  const renderMaintenance = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b">
-          <h3 className="text-lg font-semibold text-gray-900">Maintenance Schedule</h3>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-yellow-50 p-4 rounded-lg">
-              <h4 className="font-medium text-yellow-800 mb-2">Scheduled</h4>
-              <p className="text-sm text-gray-700">3 jobs scheduled this week</p>
-            </div>
-            <div className="bg-green-50 p-4 rounded-lg">
-              <h4 className="font-medium text-green-800 mb-2">Completed</h4>
-              <p className="text-sm text-gray-700">5 jobs completed</p>
-            </div>
-            <div className="bg-red-50 p-4 rounded-lg">
-              <h4 className="font-medium text-red-800 mb-2">Critical</h4>
-              <p className="text-sm text-gray-700">1 unit needs urgent service</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const renderMaintenance = () => <Maintenance />;
 
-  const [fleetFilter, setFleetFilter] = useState<'all'|'active'|'maintenance'|'offline'>('all');
+  const [fleetFilter, setFleetFilter] = useState<'all' | 'active' | 'maintenance' | 'offline'>('all');
+
   const renderFleetMap = () => (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow-sm border">
@@ -1067,13 +1185,13 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Fleet Map</h3>
             <div className="flex items-center space-x-2">
-              <select className="px-3 py-2 text-sm border rounded-md" value={fleetFilter} onChange={e => setFleetFilter(e.target.value as any)}>
+              <select className="px-3 py-2 text-sm border rounded-md" value={fleetFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFleetFilter(e.target.value as 'all' | 'active' | 'maintenance' | 'offline')}>
                 <option value="all">All statuses</option>
                 <option value="active">Active</option>
                 <option value="maintenance">Maintenance</option>
                 <option value="offline">Offline</option>
               </select>
-              <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => {}}>
+              <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => { }}>
                 Refresh
               </button>
             </div>
@@ -1083,8 +1201,8 @@ const Dashboard: React.FC = () => {
           <div className="rounded-lg overflow-hidden h-96">
             <MapContainer center={[-1.2921, 36.8219]} zoom={11} scrollWheelZoom className="h-full w-full">
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
-              {(fleetFilter==='all' ? units : units.filter(u=>u.status===fleetFilter)).map(u => (
-                <CircleMarker key={u.id} center={[u.coordinates[0], u.coordinates[1]]} radius={8} pathOptions={{ color: u.status==='active' ? '#22c55e' : u.status==='maintenance' ? '#eab308' : '#ef4444', fillOpacity: 0.8 }}>
+              {(fleetFilter === 'all' ? units : units.filter(u => u.status === fleetFilter)).map(u => (
+                <CircleMarker key={u.id} center={[u.coordinates[0], u.coordinates[1]]} radius={8} pathOptions={{ color: u.status === 'active' ? '#22c55e' : u.status === 'maintenance' ? '#eab308' : '#ef4444', fillOpacity: 0.8 }}>
                   <Popup>
                     <div className="text-sm">
                       <div className="font-medium">{u.serialNo}</div>
@@ -1117,193 +1235,7 @@ const Dashboard: React.FC = () => {
     </div>
   );
 
-  const renderAnalytics = () => {
-    // Compute range start once
-    const now = new Date();
-    const start = analyticsRange === 'all' ? null : new Date(now.getFullYear(), now.getMonth(), now.getDate() - Number(analyticsRange));
-    const filtered = bookings.filter((b: any) => {
-      const paidOk = !analyticsPaidOnly || b.paymentStatus === 'paid';
-      if (!paidOk) return false;
-      if (!start) return true;
-      const d = new Date(b.date);
-      return !isNaN(d.getTime()) && d >= start;
-    });
-
-    const totalRevenue = filtered.reduce((acc, b) => acc + (Number(b.amount) || 0), 0);
-    const avgUtilRaw = units.length ? units.reduce((acc, u) => acc + (Number(u.fillLevel) || 0), 0) / units.length : 0;
-    const avgUtilization = Math.round(avgUtilRaw);
-    const totalBookings = filtered.length;
-    const activeRoutes = routes.filter(r => r.status === 'active').length;
-
-    return (
-      <div className="space-y-6">
-        {/* Controls */}
-        <div className="flex items-center justify-between bg-white p-4 rounded-lg border shadow-sm">
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-700">Range</label>
-            <select
-              className="border rounded px-2 py-1 text-sm"
-              value={analyticsRange}
-              onChange={e => setAnalyticsRange(e.target.value as any)}
-            >
-              <option value="all">All time</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-              <option value="365">Last 12 months</option>
-            </select>
-            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={analyticsPaidOnly} onChange={e => setAnalyticsPaidOnly(e.target.checked)} />
-              Paid only
-            </label>
-          </div>
-          <button
-            className="px-3 py-2 text-sm border rounded"
-            onClick={() => {
-              // no-op: state changes already recompute; keep as UX affordance
-            }}
-          >
-            Recompute
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white p-6 rounded-lg shadow-sm border">
-            <div className="flex items-center justify-between" onClick={() => setAnalyticsPaidOnly(p => !p)}>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
-                <p className="text-2xl font-bold text-gray-900">KSh {totalRevenue.toLocaleString()}</p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <DollarSign className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow-sm border">
-            <div className="flex items-center justify-between" onClick={() => setAnalyticsRange('30')}>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Avg Utilization</p>
-                <p className="text-2xl font-bold text-gray-900">{avgUtilization}%</p>
-              </div>
-              <div className="p-3 bg-blue-100 rounded-full">
-                <BarChart3 className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow-sm border">
-            <div className="flex items-center justify-between" onClick={() => setAnalyticsRange('90')}>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Bookings</p>
-                <p className="text-2xl font-bold text-gray-900">{totalBookings}</p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-full">
-                <Calendar className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow-sm border">
-            <div className="flex items-center justify-between" onClick={() => setAnalyticsRange('365')}>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Active Routes</p>
-                <p className="text-2xl font-bold text-gray-900">{activeRoutes}</p>
-              </div>
-              <div className="p-3 bg-yellow-100 rounded-full">
-                <Navigation className="w-6 h-6 text-yellow-600" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-lg shadow-sm border">
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Revenue Trend</h3>
-            </div>
-            <div className="p-6">
-              {(() => {
-                // Build last 12 months buckets from filtered bookings
-                const now = new Date();
-                const months: { key: string; label: string; total: number }[] = [];
-                for (let i = 11; i >= 0; i--) {
-                  const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                  const key = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
-                  const label = d.toLocaleString(undefined, { month: 'short' });
-                  months.push({ key, label, total: 0 });
-                }
-                const idxByKey = new Map(months.map((m, i) => [m.key, i] as const));
-                filtered.forEach(b => {
-                  const d = new Date(b.date);
-                  if (isNaN(d.getTime())) return;
-                  const key = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
-                  const idx = idxByKey.get(key);
-                  if (idx !== undefined) months[idx].total += Number(b.amount) || 0;
-                });
-                const max = Math.max(1, ...months.map(m => m.total));
-                return (
-                  <div className="h-64 flex items-end gap-2">
-                    {months.map((m, i) => (
-                      <div key={m.key} className="flex-1 flex flex-col items-center">
-                        <div
-                          title={`${m.label}: KSh ${m.total.toLocaleString()}`}
-                          onClick={() => setAnalyticsRange('365')}
-                          className="w-full bg-blue-500 hover:bg-blue-600 rounded-t cursor-pointer"
-                          style={{ height: `${Math.max(4, Math.round((m.total / max) * 100))}%` }}
-                        />
-                        <span className="mt-1 text-xs text-gray-600">{i % 2 === 0 ? m.label : ''}</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border">
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Utilization by Location</h3>
-            </div>
-            <div className="p-6">
-              {(() => {
-                // Group units by location and compute avg fill level (utilization)
-                const byLoc = new Map<string, number[]>();
-                units.forEach(u => {
-                  const arr = byLoc.get(u.location) || [];
-                  arr.push(Number(u.fillLevel) || 0);
-                  byLoc.set(u.location, arr);
-                });
-                const rows = Array.from(byLoc.entries()).map(([loc, arr]) => ({
-                  loc,
-                  avg: Math.round(arr.reduce((a, b) => a + b, 0) / (arr.length || 1)),
-                })).sort((a, b) => b.avg - a.avg).slice(0, 8);
-                const max = Math.max(100, ...rows.map(r => r.avg));
-                return (
-                  <div className="space-y-2">
-                    {rows.map(r => (
-                      <div key={r.loc} className="flex items-center gap-3">
-                        <span className="w-40 text-sm text-gray-700 truncate" title={r.loc}>{r.loc}</span>
-                        <div className="flex-1 bg-gray-100 rounded">
-                          <div
-                            className="h-3 bg-green-500 rounded"
-                            style={{ width: `${Math.min(100, Math.round((r.avg / max) * 100))}%` }}
-                            title={`${r.avg}%`}
-                            onClick={() => setActiveTab('fleet')}
-                          />
-                        </div>
-                        <span className="w-10 text-xs text-gray-600 text-right">{r.avg}%</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const renderAnalytics = () => <Analytics />;
 
   const renderSettings = () => (
     <div className="space-y-6">
@@ -1372,7 +1304,7 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">Active</span>
           </div>
-          
+
           <div className="flex items-center justify-between p-4 border rounded-lg">
             <div className="flex items-center">
               <MessageSquare className="w-8 h-8 text-green-600 mr-3" />
@@ -1383,7 +1315,7 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">Active</span>
           </div>
-          
+
           <div className="flex items-center justify-between p-4 border rounded-lg">
             <div className="flex items-center">
               <Globe className="w-8 h-8 text-gray-400 mr-3" />
@@ -1404,7 +1336,7 @@ const Dashboard: React.FC = () => {
         <div className="p-6 border-b">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Team Members</h3>
-            <button 
+            <button
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
               onClick={openAddMember}
             >
@@ -1426,10 +1358,10 @@ const Dashboard: React.FC = () => {
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {teamMembers
-              .filter(member => 
+              .filter(member =>
                 member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 member.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 member.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -1444,10 +1376,10 @@ const Dashboard: React.FC = () => {
                       {member.status}
                     </span>
                   </div>
-                  
+
                   <h4 className="font-medium text-gray-900 mb-1">{member.name}</h4>
                   <p className="text-sm text-gray-600 mb-2">{member.role}</p>
-                  
+
                   <div className="space-y-1 mb-3">
                     <div className="flex items-center text-xs text-gray-500">
                       <Mail className="w-3 h-3 mr-1" />
@@ -1462,22 +1394,22 @@ const Dashboard: React.FC = () => {
                       <span>Joined {member.joinDate}</span>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center justify-between">
                     <div className="flex space-x-2">
-                      <button 
+                      <button
                         className="text-blue-600 hover:text-blue-800 transition-colors"
                         onClick={() => console.log('View member:', member.id)}
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button 
+                      <button
                         className="text-green-600 hover:text-green-800 transition-colors"
                         onClick={() => openEditMember(member)}
                       >
                         <Edit className="w-4 h-4" />
                       </button>
-                      <button 
+                      <button
                         className="text-red-600 hover:text-red-800 transition-colors"
                         onClick={() => deleteMember(member.id)}
                       >
@@ -1488,18 +1420,18 @@ const Dashboard: React.FC = () => {
                 </div>
               ))}
           </div>
-          
-          {teamMembers.filter(member => 
+
+          {teamMembers.filter(member =>
             member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             member.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
             member.email.toLowerCase().includes(searchTerm.toLowerCase())
           ).length === 0 && (
-            <div className="text-center py-8">
-              <Users className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">No team members found</p>
-              <p className="text-sm text-gray-400">Try adjusting your search terms</p>
-            </div>
-          )}
+              <div className="text-center py-8">
+                <Users className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                <p className="text-gray-500">No team members found</p>
+                <p className="text-sm text-gray-400">Try adjusting your search terms</p>
+              </div>
+            )}
         </div>
       </div>
 
@@ -1529,7 +1461,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-gray-500">Auto-logout after inactivity</p>
               </div>
             </div>
-            <select className="border border-gray-300 rounded-md px-3 py-1 text-sm" value={settings.sessionTimeout} onChange={e => setSettings(s => ({ ...s, sessionTimeout: e.target.value }))}>
+            <select className="border border-gray-300 rounded-md px-3 py-1 text-sm" value={settings.sessionTimeout} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettings(s => ({ ...s, sessionTimeout: e.target.value }))}>
               <option value="30">30 minutes</option>
               <option value="60">1 hour</option>
               <option value="120">2 hours</option>
@@ -1582,11 +1514,11 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberPhone} onChange={e => setFormMemberPhone(e.target.value)} />
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={formMemberPhone} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormMemberPhone(e.target.value)} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select className="w-full border rounded px-3 py-2 text-sm" value={formMemberStatus} onChange={e => setFormMemberStatus(e.target.value as any)}>
+                  <select className="w-full border rounded px-3 py-2 text-sm" value={formMemberStatus} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormMemberStatus(e.target.value as TeamMember['status'])}>
                     <option value="active">active</option>
                     <option value="inactive">inactive</option>
                   </select>
@@ -1603,34 +1535,62 @@ const Dashboard: React.FC = () => {
 
       {/* Content area only: top navigation is provided by ProtectedLayout */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex items-center justify-end mb-4">
+        <div className="flex flex-col gap-3 mb-6 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
+            <p className="text-sm text-gray-500">{t('dashboard.subtitle')}</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label htmlFor="locale" className="text-xs text-gray-500">{t('dashboard.localeLabel')}</label>
+            <select
+              id="locale"
+              value={locale}
+              onChange={(e) => setLocale(e.target.value as 'en' | 'sw')}
+              className="border border-gray-300 rounded-md px-2 py-1 text-sm"
+            >
+              <option value="en">English</option>
+              <option value="sw">Kiswahili</option>
+            </select>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search units, routes, or bookings..."
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+            </div>
+          </div>
         </div>
+        <nav className="mb-6 border-b border-gray-200">
+          <div className="flex flex-wrap gap-3">
+            {tabs.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`${activeTab === key ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} border-b-2 px-3 py-2 text-sm font-medium`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Sidebar */}
           <div className="w-full lg:w-64 flex-shrink-0">
             <nav className="bg-white rounded-lg shadow-sm border p-4">
               <ul className="space-y-2">
-                {[
-                  { id: 'overview', label: 'Overview', icon: BarChart3 },
-                  { id: 'fleet', label: 'Fleet Map', icon: MapPin },
-                  { id: 'routes', label: 'Routes', icon: Navigation },
-                  { id: 'payments', label: 'Payments', icon: CreditCard },
-                  { id: 'insights', label: 'Insights', icon: BarChart3 },
-                  { id: 'bookings', label: 'Bookings', icon: Calendar },
-                  { id: 'maintenance', label: 'Maintenance', icon: Wrench },
-                  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
-                  { id: 'settings', label: 'Settings', icon: Settings },
-                ].map((item) => {
+                {sidebarItems.map((item) => {
                   const Icon = item.icon;
                   return (
                     <li key={item.id}>
                       <button
                         onClick={() => setActiveTab(item.id)}
-                        className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                          activeTab === item.id
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                        }`}
+                        className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === item.id
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                          }`}
                       >
                         <Icon className="w-4 h-4 mr-3" />
                         {item.label}

@@ -1,4 +1,8 @@
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -12,6 +16,24 @@ app.use(bodyParser.json());
 
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 const AI = require('./ai');
+// Auth helper
+function generateToken(user) {
+  const payload = { sub: user.id, email: user.email, role: user.role };
+  const secret = process.env.JWT_SECRET || 'defaultsecret';
+  return jwt.sign(payload, secret, { expiresIn: '2h' });
+}
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Missing Authorization header' });
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'defaultsecret');
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
 const Forecast = require('./forecast');
 
 // ------------------------------
@@ -34,8 +56,7 @@ const _weatherCache = new Map(); // key: city -> { ts: Date.now(), data }
 const _analyticsEvents = []; // basic in-memory event store when enabled
 
 // In-memory transaction store (demo only)
-const transactions = [];
-let txIdCounter = 1;
+// In-memory transaction store removed; using Prisma for persistence
 
 // Paystack: initialize transaction
 app.post('/api/paystack/init', async (req, res) => {
@@ -52,16 +73,15 @@ app.post('/api/paystack/init', async (req, res) => {
       }
     });
 
-    // record minimal transaction info in-memory
-    const record = {
-      id: txIdCounter++,
-      provider: 'paystack',
-      email,
-      amount,
-      createdAt: new Date().toISOString(),
-      raw: resp.data
-    };
-    transactions.unshift(record);
+    // Persist transaction using Prisma
+    const record = await prisma.transaction.create({
+      data: {
+        provider: 'paystack',
+        email,
+        amount,
+        raw: JSON.stringify(resp.data)
+      }
+    });
     res.json(resp.data);
   } catch (err) {
     console.error(err.response && err.response.data ? err.response.data : err.message);
@@ -235,7 +255,7 @@ app.post('/api/mpesa/stk', async (req, res) => {
     // Build STK Push request
     const shortcode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
-    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0,14);
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
     const password = Buffer.from(shortcode + passkey + timestamp).toString('base64');
 
     const stkUrl = process.env.MPESA_ENVIRONMENT === 'production'
@@ -275,31 +295,127 @@ app.post('/api/mpesa/stk', async (req, res) => {
 });
 
 // Admin: list transactions (in-memory)
-app.get('/api/admin/transactions', (req, res) => {
-  res.json({ transactions });
+app.get('/api/admin/transactions', async (req, res) => {
+  try {
+    const transactions = await prisma.transaction.findMany();
+    res.json({ transactions });
+  } catch (err) {
+    console.error('Error fetching transactions', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
 });
 
 // Admin: seed demo transactions (for local testing only)
-app.post('/api/admin/seed', (req, res) => {
-  const demo = [
-    { id: txIdCounter++, provider: 'paystack', email: 'demo1@example.com', amount: 1500, createdAt: new Date().toISOString(), raw: { demo: true } },
-    { id: txIdCounter++, provider: 'mpesa', phone: '+254700000000', amount: 800, createdAt: new Date().toISOString(), raw: { demo: true } },
-  ];
-  transactions.unshift(...demo);
-  res.json({ success: true, added: demo.length });
+// Register endpoint (for demo purposes)
+app.post('/api/auth/register', async (req, res) => {
+  const { email, password, name, role } = req.body;
+  if (!email || !password || !name) return res.status(400).json({ error: 'email, password, name required' });
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({ data: { email, password: hashed, name, role: role || 'admin' } });
+    const token = generateToken(user);
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  } catch (err) {
+    console.error('Register error', err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login endpoint
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+    const token = generateToken(user);
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  } catch (err) {
+    console.error('Login error', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Protect admin routes
+app.use('/api/admin', authMiddleware);
+
+// Admin: list transactions (protected)
+app.get('/api/admin/transactions', async (req, res) => {
+  try {
+    const transactions = await prisma.transaction.findMany();
+    res.json({ transactions });
+  } catch (err) {
+    console.error('Error fetching transactions', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+// Admin: seed demo transactions (protected)
+app.post('/api/admin/seed', async (req, res) => {
+  try {
+    const demo = [
+      { provider: 'paystack', email: 'demo1@example.com', amount: 1500, raw: JSON.stringify({ demo: true }) },
+      { provider: 'mpesa', phone: '+254700000000', amount: 800, raw: JSON.stringify({ demo: true }) }
+    ];
+    await prisma.transaction.createMany({ data: demo });
+    res.json({ success: true, added: demo.length });
+  } catch (err) {
+    console.error('Error seeding transactions', err);
+    res.status(500).json({ error: 'Failed to seed transactions' });
+  }
+});
+
+// Admin: delete transaction by id (protected)
+app.delete('/api/admin/transactions/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const deleted = await prisma.transaction.delete({ where: { id } });
+    res.json({ success: true, deleted });
+  } catch (err) {
+    console.error('Error deleting transaction', err);
+    res.status(404).json({ error: 'not found' });
+  }
 });
 
 // Admin: delete transaction by id
-app.delete('/api/admin/transactions/:id', (req, res) => {
+app.delete('/api/admin/transactions/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const idx = transactions.findIndex(t => t.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'not found' });
-  transactions.splice(idx, 1);
-  res.json({ success: true });
+  try {
+    const deleted = await prisma.transaction.delete({ where: { id } });
+    res.json({ success: true, deleted });
+  } catch (err) {
+    console.error('Error deleting transaction', err);
+    res.status(404).json({ error: 'not found' });
+  }
 });
 
 function startServer(port) {
   const server = app.listen(port, () => console.log('Server listening on', port));
+  // Setup WebSocket server using the same HTTP server
+  const WebSocket = require('ws');
+  const wss = new WebSocket.Server({ server });
+  wss.on('connection', (ws) => {
+    console.log('WebSocket client connected');
+    ws.on('message', (msg) => {
+      console.log('Received WS message:', msg);
+      // Echo back
+      ws.send(`Echo: ${msg}`);
+    });
+    ws.on('close', () => console.log('WebSocket client disconnected'));
+  });
+  // Simple endpoint to broadcast a message to all WS clients (protected)
+  app.post('/api/ws/broadcast', authMiddleware, (req, res) => {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+    res.json({ success: true });
+  });
   server.on('error', (err) => {
     if (err && err.code === 'EADDRINUSE') {
       console.warn(`Port ${port} in use, trying ${port + 1}`);

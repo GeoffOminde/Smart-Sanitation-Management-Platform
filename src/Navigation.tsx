@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, Truck, Bell } from 'lucide-react';
+import { Users, Truck, Bell, Calendar } from 'lucide-react';
 import { useAuth } from './AuthContext';
 
 const Navigation: React.FC = () => {
@@ -130,6 +130,14 @@ const Navigation: React.FC = () => {
           className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors duration-200"
         >
           Value
+        </Link>
+
+        <Link 
+          to="/bookings" 
+          className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors duration-200"
+        >
+          <Calendar className="h-4 w-4 mr-1" />
+          Bookings
         </Link>
 
         {/* Profile Dropdown */}

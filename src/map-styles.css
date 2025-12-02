@@ -1,0 +1,62 @@
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  min-height: 400px;
+  margin: 0 auto;
+  z-index: 0;
+}
+
+/* Custom marker styles */
+.custom-div-icon {
+  background: transparent;
+  border: none;
+}
+
+/* Popup styles */
+.leaflet-popup-content {
+  margin: 0;
+  width: auto !important;
+  min-width: 200px;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Scrollbar styles for popup content */
+.custom-popup-content {
+  max-height: 300px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db #f3f4f6;
+  padding: 0.5rem;
+}
+
+.custom-popup-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-popup-content::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.custom-popup-content::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 3px;
+}
+
+/* Marker hover effect */
+.leaflet-marker-icon {
+  transition: transform 0.2s ease;
+}
+
+.leaflet-marker-icon:hover {
+  transform: scale(1.2);
+}
+
+/* Hide default popup close button */
+.leaflet-popup-close-button {
+  display: none;
+}

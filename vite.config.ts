@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
     exclude: ['lucide-react'],
+    include: ['lucide-react/dist/esm/icons/file-text', 'lucide-react/dist/esm/icons/settings', /* other specific icons */]
   },
   server: {
     proxy: {
