@@ -1769,7 +1769,7 @@ const Dashboard: React.FC = () => {
       case 'maintenance':
         return renderMaintenance();
       case 'analytics':
-        return renderAnalytics();
+        return <Analytics />;
       case 'settings':
         return renderSettings();
       default:
