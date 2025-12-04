@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  provider  String
+  email     String?
+  phone     String?
+  amount    Float
+  status    String   @default("pending")
+  metadata  String?
+  raw       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Booking {
+  id         String   @id @default(uuid())
+  customerId String
+  location   String
+  units      Int
+  date       DateTime
+  duration   Int
+  status     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Unit {
+  id             String   @id @default(uuid())
+  serialNo       String   @unique
+  location       String
+  fillLevel      Int
+  batteryLevel   Int
+  status         String
+  lastSeen       DateTime @default(now())
+  coordinates    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  maintenanceLogs MaintenanceLog[]
+}
+
+model MaintenanceLog {
+  id            String    @id @default(uuid())
+  unitId        String
+  unit          Unit      @relation(fields: [unitId], references: [id])
+  type          String
+  description   String
+  scheduledDate DateTime
+  completedDate DateTime?
+  technicianId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

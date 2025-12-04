@@ -14,7 +14,7 @@ const AirtelMoneyForm = () => {
     setMessage('Submitting Airtel Money payment (demo)...');
     try {
       await new Promise((res) => setTimeout(res, 1000));
-      setMessage('Airtel Money payment simulated — integrate provider SDK/API for production');
+      setMessage('Airtel Money integration is coming soon!');
     } catch (err) {
       setMessage('Airtel Money payment failed');
     }

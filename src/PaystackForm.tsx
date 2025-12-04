@@ -1,43 +1,37 @@
 import { useState } from 'react';
+import { apiFetch } from './lib/api';
 
-type PaystackFormProps = {
-  publicKey?: string; // optional override; otherwise falls back to VITE_PAYSTACK_PUBLIC
-};
-
-const PaystackForm = ({ publicKey }: PaystackFormProps) => {
-  const ENV_KEY = (import.meta as any)?.env?.VITE_PAYSTACK_PUBLIC as string | undefined;
-  const effectiveKey = publicKey || ENV_KEY || '';
-  const isKeyValid = typeof effectiveKey === 'string' && /^pk_(test|live)_/i.test(effectiveKey);
+const PaystackForm = () => {
   const [email, setEmail] = useState('');
   const [amount, setAmount] = useState(0);
   const [message, setMessage] = useState('');
 
-  const handlePay = (e: React.FormEvent) => {
+  const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
-    // For production, you should generate a transaction on the server and return an authorization_url
-    // Here we simulate client-side integration using Paystack inline (demo)
-    if (!effectiveKey || !isKeyValid) {
-      // Silently no-op when key is absent
-      return;
-    }
     if (!email || amount <= 0) return setMessage('Please provide valid email and amount');
 
-    // Create a new Paystack inline transaction
-    const handler = (window as any).PaystackPop && (window as any).PaystackPop.setup({
-      key: effectiveKey,
-      email,
-      // Paystack expects amount in kobo (minor units). Ensure you convert appropriately.
-      amount: Math.round(amount * 100),
-      onClose: () => setMessage('Payment cancelled'),
-      callback: (response: any) => {
-        setMessage('Payment successful. Reference: ' + response.reference);
-      }
-    });
+    setMessage('Initializing Paystack transaction...');
 
-    if (handler && typeof handler.openIframe === 'function') {
-      handler.openIframe();
-    } else {
-      // Silently no-op if inline handler is unavailable
+    try {
+      const resp = await apiFetch('/api/paystack/init', {
+        method: 'POST',
+        data: { email, amount }
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || 'Paystack init failed');
+      }
+
+      const data = await resp.json();
+      if (data.authorization_url) {
+        setMessage('Redirecting to Paystack...');
+        window.location.href = data.authorization_url;
+      } else {
+        setMessage('Error: No authorization URL returned');
+      }
+    } catch (err: any) {
+      setMessage(`Error: ${err.message || 'Failed to initialize Paystack'}`);
     }
   };
 
