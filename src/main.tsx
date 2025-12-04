@@ -5,6 +5,7 @@ import App from './App';
 import { AuthProvider } from './AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { SettingsProvider } from './contexts/SettingsContext';
+import { LocaleProvider } from './contexts/LocaleContext';
 import './index.css';
 
 const container = document.getElementById('root');
@@ -18,9 +19,11 @@ root.render(
     <BrowserRouter>
       <AuthProvider>
         <SettingsProvider>
-          <NotificationProvider>
-            <App />
-          </NotificationProvider>
+          <LocaleProvider>
+            <NotificationProvider>
+              <App />
+            </NotificationProvider>
+          </LocaleProvider>
         </SettingsProvider>
       </AuthProvider>
     </BrowserRouter>

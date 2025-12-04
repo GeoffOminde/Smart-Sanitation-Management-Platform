@@ -14,10 +14,5 @@ export default defineConfig({
       '/api': 'http://localhost:3001',
     },
   },
-  server: {
-    proxy: {
-      // Proxy API requests to the backend server during development
-      '/api': 'http://localhost:3001',
-    },
-  },
+
 });
