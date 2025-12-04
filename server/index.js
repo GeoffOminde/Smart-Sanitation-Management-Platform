@@ -10,6 +10,13 @@ const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const WebSocket = require('ws');
 
+// Validate critical environment variables at startup
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is not set. Server cannot start.');
+  console.error('Generate a secure secret with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
 const prisma = new PrismaClient();
 const app = express();
 app.use(cors());

@@ -1,14 +1,24 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = new PrismaClient();
 
 async function main() {
+    // Use environment variable or generate a random password
+    const adminPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex');
+
+    if (!process.env.ADMIN_PASSWORD) {
+        console.log('⚠️  No ADMIN_PASSWORD environment variable set.');
+        console.log('📝 Generated random admin password:', adminPassword);
+        console.log('🔐 Please save this password securely!');
+    }
+
     const adminUser = await prisma.user.upsert({
         where: { email: 'admin@example.com' },
         update: {},
         create: {
             email: 'admin@example.com',
-            password: await bcrypt.hash('admin123', 10),
+            password: await bcrypt.hash(adminPassword, 10),
             name: 'Admin User',
             role: 'admin',
         },
