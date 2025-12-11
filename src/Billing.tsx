@@ -366,10 +366,10 @@ const Billing: React.FC = () => {
                                         onClick={async () => {
                                             if (currentPlan !== plan.id && plan.id !== 'enterprise') {
                                                 try {
-                                                    // Map plan IDs to Paystack plan codes
+                                                    // Map plan IDs to Paystack plan codes from env
                                                     const planCodes = {
-                                                        starter: 'PLN_zyw0cp8ccd5xpcy',  // KES 6,400/month
-                                                        growth: 'PLN_exoh57kbtfo8hwi'    // KES 20,000/month
+                                                        starter: import.meta.env.VITE_PAYSTACK_PLAN_STARTER || 'PLN_starter_default',
+                                                        growth: import.meta.env.VITE_PAYSTACK_PLAN_GROWTH || 'PLN_growth_default'
                                                     };
 
                                                     const response = await fetch('http://localhost:3001/api/billing/create-subscription', {
