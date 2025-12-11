@@ -21,7 +21,7 @@ Enabling: Creates tech and financial infrastructure for scaling (SDG 9, SDG 17).
 - [API Integration](#api-integration)
 - [Contributing](#contributing)
 - [License](#license)
-
+---
 ### ✨ Features
 Core Functionality
 
