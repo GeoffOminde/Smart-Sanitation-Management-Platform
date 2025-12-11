@@ -554,59 +554,8 @@ app.get('/api/mpesa/token', async (req, res) => {
   }
 });
 
-app.post('/api/mpesa/stk', async (req, res) => {
-  const { phone, amount } = req.body;
-  if (!phone || !amount) return res.status(400).json({ error: 'phone and amount required' });
-  try {
-    const key = process.env.MPESA_CONSUMER_KEY;
-    const secret = process.env.MPESA_CONSUMER_SECRET;
-    const auth = Buffer.from(`${key}:${secret}`).toString('base64');
-    const tokenUrl = process.env.MPESA_ENVIRONMENT === 'production'
-      ? 'https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials'
-      : 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-    const tokenResp = await axios.get(tokenUrl, { headers: { Authorization: `Basic ${auth}` } });
-    const token = tokenResp.data.access_token;
+// Duplicate M-Pesa endpoints removed
 
-    const shortcode = process.env.MPESA_SHORTCODE;
-    const passkey = process.env.MPESA_PASSKEY;
-    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
-    const password = Buffer.from(shortcode + passkey + timestamp).toString('base64');
-    const stkUrl = process.env.MPESA_ENVIRONMENT === 'production'
-      ? 'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest'
-      : 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
-
-    const body = {
-      BusinessShortCode: shortcode,
-      Password: password,
-      Timestamp: timestamp,
-      TransactionType: 'CustomerPayBillOnline',
-      Amount: amount,
-      PartyA: phone,
-      PartyB: shortcode,
-      PhoneNumber: phone,
-      CallBackURL: process.env.MPESA_CALLBACK_URL || 'https://example.com/mpesa/callback',
-      AccountReference: 'SmartSanitation',
-      TransactionDesc: 'Payment'
-    };
-    const stkResp = await axios.post(stkUrl, body, { headers: { Authorization: `Bearer ${token}` } });
-
-    // Persist via Prisma
-    await prisma.transaction.create({
-      data: {
-        provider: 'mpesa',
-        phone,
-        amount,
-        raw: JSON.stringify(stkResp.data),
-        status: 'pending'
-      }
-    });
-
-    res.json(stkResp.data);
-  } catch (err) {
-    console.error(err.response && err.response.data ? err.response.data : err.message);
-    res.status(500).json({ error: 'STK push failed' });
-  }
-});
 
 // Admin Routes (Protected)
 // Temporarily disabled auth middleware for demo purposes since frontend uses mock auth
