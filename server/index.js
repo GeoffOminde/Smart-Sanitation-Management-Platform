@@ -9,6 +9,14 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const WebSocket = require('ws');
+const { routeOptimize, predictMaintenance } = require('./ai');
+
+const ROI_CONSTANTS = {
+  AVOIDED_RATE: 0.35,
+  BASE_AVOIDED: 120,
+  BASE_MILES: 12,
+  FUEL_RATE: 1.5
+};
 
 // Validate critical environment variables at startup
 if (!process.env.JWT_SECRET) {
@@ -239,13 +247,13 @@ app.post('/api/mpesa/stk', async (req, res) => {
     const accessToken = tokenResp.data.access_token;
 
     // 2. Generate Password
-    const date = new Date();
-    const timestamp = date.getFullYear() +
-      ('0' + (date.getMonth() + 1)).slice(-2) +
-      ('0' + date.getDate()).slice(-2) +
-      ('0' + date.getHours()).slice(-2) +
-      ('0' + date.getMinutes()).slice(-2) +
-      ('0' + date.getSeconds()).slice(-2);
+    // 2. Generate Password
+    // M-Pesa requires YYYYMMDDHHMMSS in GMT+3 (Nairobi)
+    const now = new Date();
+    // 3 hours offset in milliseconds
+    const nairobiTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+
+    const timestamp = nairobiTime.toISOString().replace(/[-T:.Z]/g, '').slice(0, 14);
 
     const password = Buffer.from(shortCode + passkey + timestamp).toString('base64');
 
@@ -484,100 +492,16 @@ if (ENABLE_FORECAST_API) {
 }
 
 // ==================== Weather API ====================
-app.get('/api/weather/current', async (req, res) => {
-  try {
-    const city = req.query.city || 'Nairobi';
-    const apiKey = process.env.OPENWEATHER_API_KEY;
+// Duplicate weather route removed
 
-    if (!apiKey) {
-      console.warn('[Weather API] No API key configured, using mock data');
-      return res.json({
-        main: { temp: 25, humidity: 65, feels_like: 26, pressure: 1012 },
-        wind: { speed: 3.6, deg: 230 },
-        weather: [{ main: 'Clouds', description: 'scattered clouds', icon: '03d' }],
-        name: city,
-        isMock: true
-      });
-    }
-
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
-    const response = await axios.get(url, { timeout: 5000 });
-
-    res.json(response.data);
-  } catch (err) {
-    console.error('[Weather API] Error:', err.message);
-    // Return mock data on error
-    res.json({
-      main: { temp: 25, humidity: 65, feels_like: 26, pressure: 1012 },
-      wind: { speed: 3.6, deg: 230 },
-      weather: [{ main: 'Clouds', description: 'scattered clouds', icon: '03d' }],
-      name: req.query.city || 'Nairobi',
-      isMock: true
-    });
-  }
-});
 
 // ==================== AI Endpoints ====================
 // Predictive Maintenance
 app.post('/api/ai/predict-maintenance', (req, res) => {
   try {
     const { units = [] } = req.body;
-
-    // Simple heuristic-based risk assessment
-    const results = units.map(unit => {
-      let riskScore = 0;
-      let risk = 'low';
-      const reasons = [];
-
-      // Check fill level
-      if (unit.fillLevel > 90) {
-        riskScore += 30;
-        reasons.push('High fill level');
-      } else if (unit.fillLevel > 75) {
-        riskScore += 15;
-      }
-
-      // Check battery level
-      if (unit.batteryLevel < 20) {
-        riskScore += 40;
-        reasons.push('Low battery');
-      } else if (unit.batteryLevel < 40) {
-        riskScore += 20;
-      }
-
-      // Check last seen (if more than 2 hours ago)
-      const lastSeenDate = new Date(unit.lastSeen);
-      const hoursSinceLastSeen = (Date.now() - lastSeenDate.getTime()) / (1000 * 60 * 60);
-      if (hoursSinceLastSeen > 2) {
-        riskScore += 30;
-        reasons.push('Not reporting');
-      }
-
-      // Determine risk level
-      if (riskScore >= 60) {
-        risk = 'high';
-      } else if (riskScore >= 30) {
-        risk = 'medium';
-      }
-
-      return {
-        id: unit.id,
-        serialNo: unit.serialNo,
-        location: unit.location,
-        riskScore,
-        risk,
-        reasons,
-        recommendation: risk === 'high'
-          ? 'Immediate attention required'
-          : risk === 'medium'
-            ? 'Schedule maintenance soon'
-            : 'No action needed'
-      };
-    });
-
-    // Sort by risk score (highest first)
-    results.sort((a, b) => b.riskScore - a.riskScore);
-
+    // Use shared AI logic
+    const results = predictMaintenance(units);
     res.json({ results });
   } catch (err) {
     console.error('[Predictive Maintenance] Error:', err);
@@ -594,52 +518,13 @@ app.post('/api/ai/route-optimize', (req, res) => {
       return res.status(400).json({ error: 'Depot and stops required' });
     }
 
-    // Simple nearest-neighbor algorithm
-    const orderedStops = [];
-    let currentLocation = depot;
-    const remainingStops = [...stops];
-    let totalDistance = 0;
-
-    while (remainingStops.length > 0) {
-      let nearestIndex = 0;
-      let nearestDistance = Infinity;
-
-      // Find nearest stop
-      remainingStops.forEach((stop, index) => {
-        if (!stop.coordinates) return;
-        const [lat, lon] = stop.coordinates;
-        const distance = Math.sqrt(
-          Math.pow(lat - currentLocation[0], 2) +
-          Math.pow(lon - currentLocation[1], 2)
-        );
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearestIndex = index;
-        }
-      });
-
-      const nearestStop = remainingStops[nearestIndex];
-      orderedStops.push({
-        ...nearestStop,
-        legDistanceKm: (nearestDistance * 111).toFixed(2) // Rough conversion to km
-      });
-
-      totalDistance += nearestDistance * 111;
-      currentLocation = nearestStop.coordinates;
-      remainingStops.splice(nearestIndex, 1);
-    }
-
-    // Return to depot
-    const returnDistance = Math.sqrt(
-      Math.pow(currentLocation[0] - depot[0], 2) +
-      Math.pow(currentLocation[1] - depot[1], 2)
-    ) * 111;
-    totalDistance += returnDistance;
+    // Use shared Haversine-based logic
+    const result = routeOptimize({ depot, stops });
 
     res.json({
-      orderedStops,
-      totalDistanceKm: totalDistance.toFixed(2),
-      estimatedTimeHours: (totalDistance / 40).toFixed(1), // Assuming 40 km/h average
+      orderedStops: result.orderedStops,
+      totalDistanceKm: result.totalDistanceKm,
+      estimatedTimeHours: (result.totalDistanceKm / 40).toFixed(1), // Assuming 40 km/h average
       savings: {
         distance: '15%',
         fuel: 'KSh 450'
@@ -897,9 +782,9 @@ if (ENABLE_ANALYTICS_API) {
       ]);
 
       const totalServicings = logs.length || 1;
-      const pickupsAvoided = Math.floor(totalServicings * 0.35) + 120;
-      const routeMilesReduced = pickupsAvoided * 12;
-      const fuelSavings = routeMilesReduced * 1.5;
+      const pickupsAvoided = Math.floor(totalServicings * ROI_CONSTANTS.AVOIDED_RATE) + ROI_CONSTANTS.BASE_AVOIDED;
+      const routeMilesReduced = pickupsAvoided * ROI_CONSTANTS.BASE_MILES;
+      const fuelSavings = routeMilesReduced * ROI_CONSTANTS.FUEL_RATE;
 
       const activeUnits = units.filter(u => u.status === 'active').length;
       const totalUnits = units.length || 1;
@@ -1196,56 +1081,7 @@ app.delete('/api/team-members/:id', async (req, res) => {
 });
 
 // Settings
-app.get('/api/settings', async (req, res) => {
-  try {
-    // Assuming single row settings
-    let settings = await prisma.settings.findFirst();
-    if (!settings) {
-      // Return default if not exists
-      return res.json({
-        companyName: 'Smart Sanitation Co.',
-        contactEmail: 'admin@smartsanitation.co.ke',
-        phone: '+254 700 000 000',
-        language: 'en',
-        sessionTimeout: '30',
-        emailNotifications: true,
-        whatsappNotifications: true,
-      });
-    }
-    res.json(settings);
-  } catch (err) {
-    console.error('Error fetching settings', err);
-    res.status(500).json({ error: 'Failed to fetch settings' });
-  }
-});
-
-app.post('/api/settings', async (req, res) => {
-  try {
-    const existing = await prisma.settings.findFirst();
-    let settings;
-    const data = { ...req.body };
-
-    // Ensure userId is present for creation (default to admin if missing)
-    if (!existing && !data.userId) {
-      data.userId = 'admin-user';
-    }
-
-    // Remove fields that should not be updated manually
-    delete data.id;
-    delete data.createdAt;
-    delete data.updatedAt;
-
-    if (existing) {
-      settings = await prisma.settings.update({ where: { id: existing.id }, data });
-    } else {
-      settings = await prisma.settings.create({ data });
-    }
-    res.json(settings);
-  } catch (err) {
-    console.error('Error saving settings', err);
-    res.status(500).json({ error: 'Failed to save settings: ' + err.message });
-  }
-});
+// Duplicate settings endpoints removed (use authenticated versions)
 
 app.get('/api/admin/transactions', async (req, res) => {
   try {

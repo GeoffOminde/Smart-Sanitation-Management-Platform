@@ -3,13 +3,19 @@ import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { Truck, MapPin, Navigation } from 'lucide-react';
 import { renderToString } from 'react-dom/server';
 
 // Fix for default Leaflet icons in React
-// const createIcon = ... (removed for stability)
-// const truckIcon = createIcon(<Truck size={16} color="#3b82f6" />, '#3b82f6');
-// const unitIcon = createIcon(<MapPin size={16} color="#ef4444" />, '#ef4444');
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+    iconUrl: markerIcon,
+    iconRetinaUrl: markerIcon2x,
+    shadowUrl: markerShadow,
+});
 
 const truckIcon = new L.Icon.Default();
 const unitIcon = new L.Icon.Default();
