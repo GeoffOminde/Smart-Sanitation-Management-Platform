@@ -42,160 +42,165 @@ const Navigation: React.FC = () => {
     setProfileOpen(false);
   };
 
+  // Premium Glassmorphism Header Design
   return (
-    <nav className="flex items-center justify-between bg-white shadow-sm border-b max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div className="flex items-center">
-        <Link to="/dashboard" className="flex items-center">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Truck className="w-5 h-5 text-white" />
-          </div>
-          <div className="ml-3">
-            <h1 className="text-xl font-semibold text-gray-900">Smart Sanitation</h1>
-            <p className="text-sm text-gray-500">Fleet Management Platform</p>
-          </div>
-        </Link>
-      </div>
-      <div className="flex items-center space-x-3">
-        <Link
-          to="/value"
-          className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors duration-200"
-        >
-          Value
-        </Link>
-        <Link
-          to="/assistant"
-          className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors duration-200"
-        >
-          Assistant
-        </Link>
-        {/* Profile dropdown */}
-        <div className="relative" ref={profileRef}>
-          <button
-            onClick={() => {
-              setProfileOpen(!profileOpen);
-              setNotificationsOpen(false);
-            }}
-            className="flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            aria-expanded={profileOpen}
-            aria-haspopup="true"
-          >
-            <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-              <Users className="w-4 h-4 text-gray-600" />
-            </div>
-          </button>
-          {profileOpen && (
-            <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 focus:outline-none z-50">
-              <div className="py-1" role="menu" aria-orientation="vertical" aria-labelledby="user-menu">
-                <Link
-                  to="/profile"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  role="menuitem"
-                  onClick={() => setProfileOpen(false)}
-                >
-                  Profile
-                </Link>
-                <Link
-                  to="/admin/transactions"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  role="menuitem"
-                  onClick={() => setProfileOpen(false)}
-                >
-                  Admin — Transactions
-                </Link>
-                <button
-                  onClick={() => {
-                    logout();
-                    navigate('/login');
-                    setProfileOpen(false);
-                  }}
-                  className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-gray-100"
-                  role="menuitem"
-                >
-                  Logout
-                </button>
+    <nav className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md border-b border-gray-100 shadow-sm transition-all duration-300">
+      <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+
+          {/* Logo Section */}
+          <div className="flex-shrink-0 flex items-center gap-3">
+            <Link to="/dashboard" className="flex items-center gap-2 group">
+              <div className="relative w-10 h-10 flex items-center justify-center bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl shadow-lg shadow-blue-500/30 group-hover:scale-105 transition-transform duration-200">
+                <Truck className="w-6 h-6 text-white" />
+                <div className="absolute inset-0 rounded-xl bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
               </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-700 tracking-tight">
+                  Smart Sanitation Management Platform
+                </span>
+              </div>
+            </Link>
+          </div>
+
+          {/* Center Navigation Links (Desktop) */}
+          <div className="hidden md:flex items-center space-x-1 bg-gray-50/80 p-1.5 rounded-full border border-gray-200/50">
+            <Link
+              to="/dashboard"
+              className="px-4 py-1.5 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-white rounded-full transition-all duration-200"
+            >
+              Overview
+            </Link>
+            <Link
+              to="/value"
+              className="px-4 py-1.5 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-white rounded-full transition-all duration-200"
+            >
+              Value
+            </Link>
+            <Link
+              to="/assistant"
+              className="px-4 py-1.5 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-white rounded-full transition-all duration-200"
+            >
+              Assistant
+            </Link>
+          </div>
+
+          {/* Right Actions Section */}
+          <div className="flex items-center gap-4">
+
+            {/* Notifications */}
+            <div className="relative" ref={notificationsRef}>
+              <button
+                type="button"
+                onClick={toggleNotifications}
+                className="relative p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50/50 rounded-full transition-colors duration-200 focus:outline-none"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-white"></span>
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Dropdown (Styled) */}
+              {notificationsOpen && (
+                <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 overflow-hidden transform origin-top-right transition-all animate-in fade-in zoom-in-95 duration-200 z-50">
+                  <div className="px-5 py-4 border-b border-gray-50 bg-gray-50/50 flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-gray-900">Notifications</h3>
+                    <div className="flex gap-3 text-xs">
+                      <button onClick={markAllAsRead} disabled={unreadCount === 0} className="text-blue-600 hover:underline disabled:text-gray-400">Mark all read</button>
+                      <button onClick={clearAll} disabled={notifications.length === 0} className="text-gray-500 hover:text-red-500 disabled:text-gray-300">Clear</button>
+                    </div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto custom-scrollbar">
+                    {notifications.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <div className="mx-auto w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-2">
+                          <Bell className="w-5 h-5 text-gray-300" />
+                        </div>
+                        <p className="text-sm text-gray-500">No new notifications</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-gray-50">
+                        {notifications.map(notification => (
+                          <div
+                            key={notification.id}
+                            onClick={() => markAsRead(notification.id)}
+                            className={`px-5 py-4 hover:bg-gray-50 transition-colors cursor-pointer flex gap-3 ${!notification.read ? 'bg-blue-50/30' : ''}`}
+                          >
+                            <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${notification.read ? 'bg-gray-200' : 'bg-blue-500'}`} />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900 leading-snug">{notification.title}</p>
+                              {notification.body && <p className="text-xs text-gray-500 mt-1 leading-relaxed">{notification.body}</p>}
+                              <p className="text-[10px] text-gray-400 mt-2 font-medium">{notification.time}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        {/* Notifications dropdown */}
-        <div className="relative ml-3" ref={notificationsRef}>
-          <button
-            type="button"
-            onClick={toggleNotifications}
-            className="p-1 rounded-full text-gray-500 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 relative"
-            aria-expanded={notificationsOpen}
-            aria-haspopup="true"
-          >
-            <span className="sr-only">View notifications</span>
-            <Bell className="h-5 w-5" />
-            {unreadCount > 0 && (
-              <span className="absolute top-0 right-0 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white">
-                <span className="sr-only">{unreadCount} unread notifications</span>
-              </span>
-            )}
-          </button>
-          {notificationsOpen && (
-            <div className="absolute right-0 mt-2 w-80 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50">
-              <div className="py-1">
-                <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center">
-                  <h3 className="text-sm font-medium text-gray-900">Notifications</h3>
-                  <div className="flex space-x-2">
-                    <button
-                      type="button"
-                      onClick={markAllAsRead}
-                      disabled={unreadCount === 0}
-                      className="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+
+            {/* Profile Menu */}
+            <div className="relative pl-4 border-l border-gray-200" ref={profileRef}>
+              <button
+                onClick={() => {
+                  setProfileOpen(!profileOpen);
+                  setNotificationsOpen(false);
+                }}
+                className="flex items-center gap-3 focus:outline-none group"
+              >
+                <div className="text-right hidden sm:block">
+                  <p className="text-sm font-semibold text-gray-900 leading-none group-hover:text-blue-600 transition-colors">Admin User</p>
+                  <p className="text-xs text-gray-500 mt-1">Super Admin</p>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 p-0.5 shadow-inner ring-2 ring-transparent group-hover:ring-blue-100 transition-all">
+                  <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
+                    <Users className="w-5 h-5 text-gray-600" />
+                  </div>
+                </div>
+              </button>
+
+              {/* Profile Dropdown (Styled) */}
+              {profileOpen && (
+                <div className="absolute right-0 mt-3 w-56 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 overflow-hidden transform origin-top-right transition-all animate-in fade-in zoom-in-95 duration-200 z-50">
+                  <div className="p-2 space-y-1">
+                    <Link
+                      to="/profile"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors"
                     >
-                      Mark all as read
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearAll}
-                      disabled={notifications.length === 0}
-                      className="text-xs text-red-600 hover:text-red-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+                      Profile
+                    </Link>
+                    <Link
+                      to="/admin/transactions"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors"
                     >
-                      Clear all
+                      Admin Transactions
+                    </Link>
+                  </div>
+                  <div className="p-2 border-t border-gray-50 bg-gray-50/50">
+                    <button
+                      onClick={() => {
+                        logout();
+                        navigate('/login');
+                        setProfileOpen(false);
+                      }}
+                      className="flex items-center w-full px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                    >
+                      Log out
                     </button>
                   </div>
                 </div>
-                <div className="max-h-96 overflow-y-auto">
-                  {notifications.length === 0 ? (
-                    <div className="px-4 py-3 text-center text-sm text-gray-500">No notifications</div>
-                  ) : (
-                    notifications.map(notification => (
-                      <div
-                        key={notification.id}
-                        className={`px-4 py-3 hover:bg-gray-50 cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
-                        onClick={() => {
-                          markAsRead(notification.id);
-                        }}
-                      >
-                        <div className="flex items-start">
-                          <div className="flex-shrink-0 pt-0.5">
-                            <div
-                              className={`h-2 w-2 rounded-full ${notification.read ? 'bg-transparent' : 'bg-blue-500'}`}
-                            />
-                          </div>
-                          <div className="ml-3 flex-1">
-                            <p className="text-sm font-medium text-gray-900">{notification.title}</p>
-                            {notification.body && (
-                              <p className="text-sm text-gray-600 mt-1">{notification.body}</p>
-                            )}
-                            <p className="mt-1 text-xs text-gray-500">{notification.time}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <div className="px-4 py-2 border-t border-gray-100 text-center">
-                  <button onClick={() => setNotificationsOpen(false)} className="text-xs font-medium text-gray-600 hover:text-gray-800">
-                    Close
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
-          )}
+
+          </div>
         </div>
       </div>
     </nav>

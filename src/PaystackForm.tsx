@@ -36,20 +36,47 @@ const PaystackForm = () => {
   };
 
   return (
-    <div className="bg-white p-6 rounded shadow">
-      <h3 className="text-lg font-semibold mb-4">Paystack (Demo)</h3>
-      {/* Intentionally no visible warning when key is missing */}
-      <form onSubmit={handlePay} className="space-y-3">
-        <input type="email" placeholder="Customer email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border p-2 rounded" required />
-        <input type="number" placeholder="Amount" value={amount || ''} onChange={e => setAmount(Number(e.target.value))} className="w-full border p-2 rounded" required />
+    <div className="bg-white p-6 rounded-2xl">
+      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20">
+          PS
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">Paystack</h3>
+          <p className="text-xs text-gray-500">Secure card payment</p>
+        </div>
+      </div>
+      <form onSubmit={handlePay} className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Customer Email</label>
+          <input
+            type="email"
+            placeholder="customer@example.com"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amount</label>
+          <input
+            type="number"
+            placeholder="5000"
+            value={amount || ''}
+            onChange={e => setAmount(Number(e.target.value))}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
+            required
+          />
+        </div>
         <button
           type="submit"
-          className="px-4 py-2 rounded text-white bg-blue-600 hover:bg-blue-700"
+          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:-translate-y-0.5"
         >
           Pay with Paystack
         </button>
       </form>
-      {message && <p className="mt-3 text-sm text-gray-700">{message}</p>}
+      {message && <div className="mt-4 p-3 bg-blue-50 text-blue-700 text-sm rounded-xl border border-blue-100">{message}</div>}
     </div>
   );
 };

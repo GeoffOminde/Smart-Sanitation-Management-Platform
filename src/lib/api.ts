@@ -4,7 +4,7 @@
 // Configure a production API host by setting VITE_API_BASE (without trailing slash), e.g.
 // VITE_API_BASE=https://smart-sanitation-backend.example.com
 
-export const API_BASE = (import.meta as any)?.env?.VITE_API_BASE?.replace(/\/$/, '') || '';
+export const API_BASE = (import.meta as any)?.env?.VITE_API_BASE?.replace(/\/$/, '') || 'http://localhost:3001';
 
 /**
  * Constructs the full API URL by prepending the base URL if it exists.

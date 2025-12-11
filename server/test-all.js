@@ -5,9 +5,18 @@ let authToken = '';
 async function login() {
     console.log('Logging in to obtain JWT...');
     try {
+        const email = process.env.TEST_ADMIN_EMAIL || 'admin@example.com';
+        const password = process.env.TEST_ADMIN_PASSWORD;
+
+        if (!password) {
+            console.error('ERROR: TEST_ADMIN_PASSWORD environment variable is required for testing');
+            console.error('Set it with: export TEST_ADMIN_PASSWORD=your_password');
+            process.exit(1);
+        }
+
         const resp = await axios.post(`${base}/api/auth/login`, {
-            email: 'admin@example.com',
-            password: 'admin123'
+            email,
+            password
         });
         authToken = resp.data.token;
         console.log('Obtained token');

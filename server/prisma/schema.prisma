@@ -17,6 +17,7 @@ model User {
   updatedAt DateTime @updatedAt
 }
 
+
 model Transaction {
   id        String   @id @default(uuid())
   provider  String
@@ -31,15 +32,16 @@ model Transaction {
 }
 
 model Booking {
-  id         String   @id @default(uuid())
-  customerId String
-  location   String
-  units      Int
-  date       DateTime
-  duration   Int
-  status     String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String   @id @default(uuid())
+  customer      String
+  unit          String
+  date          DateTime
+  duration      String
+  amount        Float
+  status        String
+  paymentStatus String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Unit {
@@ -56,6 +58,7 @@ model Unit {
   maintenanceLogs MaintenanceLog[]
 }
 
+
 model MaintenanceLog {
   id            String    @id @default(uuid())
   unitId        String
@@ -68,3 +71,53 @@ model MaintenanceLog {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
+
+model NotificationLog {
+  id        String   @id @default(uuid())
+  channel   String   // e.g., 'whatsapp', 'email'
+  recipient String
+  message   String
+  status    String   // 'sent', 'failed', 'delivered'
+  createdAt DateTime @default(now())
+}
+
+model Route {
+  id            String   @id @default(uuid())
+  technician    String
+  units         Int
+  status        String
+  estimatedTime String
+  priority      String
+  unitId        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  name      String
+  role      String
+  email     String
+  phone     String
+  status    String
+  joinDate  DateTime
+  lastLat   Float?
+  lastLng   Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Settings {
+  id                    String   @id @default(uuid())
+  userId                String   // Link to user
+  companyName           String
+  contactEmail          String
+  phone                 String
+  language              String   @default("en")
+  sessionTimeout        String   @default("30")
+  emailNotifications    Boolean  @default(true)
+  whatsappNotifications Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
