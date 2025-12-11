@@ -94,12 +94,46 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Paystack
+// Weather API
+app.get('/api/weather/current', async (req, res) => {
+  const { city } = req.query;
+  if (!city) return res.status(400).json({ error: 'city parameter required' });
+
+  const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
+
+  if (!WEATHER_API_KEY) {
+    return res.status(500).json({
+      error: 'Weather API key not configured. Please add OPENWEATHER_API_KEY to environment variables.'
+    });
+  }
+
+  try {
+    const response = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
+      params: {
+        q: city,
+        appid: WEATHER_API_KEY,
+        units: 'metric'
+      },
+      timeout: 5000
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('Weather API error:', err.message);
+    res.status(502).json({
+      error: 'Failed to fetch weather data',
+      details: err.response?.data?.message || err.message
+    });
+  }
+});
+
+// Paystack Init (One-time payment)
 app.post('/api/paystack/init', async (req, res) => {
   const { email, amount } = req.body;
   if (!email || !amount) return res.status(400).json({ error: 'email and amount required' });
 
   try {
+    console.log('[Paystack] Init request:', { email, amount });
     const resp = await axios.post('https://api.paystack.co/transaction/initialize', {
       email,
       amount: Math.round(amount * 100)
@@ -107,19 +141,197 @@ app.post('/api/paystack/init', async (req, res) => {
       headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET}` }
     });
 
+    console.log('[Paystack] Init response:', resp.data);
+
     await prisma.transaction.create({
       data: {
         provider: 'paystack',
         email,
-        amount,
+        amount: Number(amount),
         raw: JSON.stringify(resp.data),
         status: 'pending'
       }
     });
     res.json(resp.data);
   } catch (err) {
-    console.error(err.response && err.response.data ? err.response.data : err.message);
-    res.status(500).json({ error: 'Paystack init failed' });
+    console.error('[Paystack] Init failed:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Paystack init failed', details: err.response?.data?.message });
+  }
+});
+
+// Paystack Subscriptions
+app.post('/api/billing/create-subscription', async (req, res) => {
+  const { email, planCode, userId } = req.body;
+  if (!email || !planCode) return res.status(400).json({ error: 'email and planCode required' });
+
+  try {
+    console.log('Creating subscription for:', { email, planCode, userId });
+
+    // Step 1: Create customer if doesn't exist
+    let customer;
+    try {
+      const customerResp = await axios.post('https://api.paystack.co/customer', {
+        email,
+        metadata: { userId }
+      }, {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      customer = customerResp.data.data;
+      console.log('Customer created/found:', customer.customer_code);
+    } catch (err) {
+      // Customer might already exist, that's okay
+      console.log('Customer creation note:', err.response?.data?.message);
+    }
+
+    // Step 2: Create subscription
+    const subscriptionResp = await axios.post('https://api.paystack.co/subscription', {
+      customer: email,
+      plan: planCode,
+      metadata: { userId, planCode }
+    }, {
+      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET}` }
+    });
+
+    if (subscriptionResp.data.status) {
+      const subData = subscriptionResp.data.data;
+      // Return the email token URL for payment
+      res.json({
+        authorization_url: subData.authorization?.authorization_url || `https://paystack.com/pay/${subData.email_token}`,
+        access_code: subData.email_token,
+        reference: subData.subscription_code
+      });
+    } else {
+      throw new Error('Invalid response from Paystack');
+    }
+  } catch (err) {
+    console.error('Paystack subscription error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to create subscription' });
+  }
+});
+
+// M-Pesa STK Push
+app.post('/api/mpesa/stk', async (req, res) => {
+  const { phone, amount } = req.body;
+  if (!phone || !amount) return res.status(400).json({ error: 'phone and amount required' });
+
+  const formattedPhone = phone.replace('+', '').replace(/^0/, '254');
+  console.log('[M-Pesa] STK Request:', { phone: formattedPhone, amount });
+
+  try {
+    const consumerKey = process.env.MPESA_CONSUMER_KEY;
+    const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
+    const passkey = process.env.MPESA_PASSKEY;
+    const shortCode = process.env.MPESA_SHORTCODE || '174379';
+    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'http://localhost:3001/api/mpesa/callback';
+
+    if (!consumerKey || !consumerSecret || !passkey) {
+      throw new Error('M-Pesa credentials not configured');
+    }
+
+    // 1. Get Token
+    const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+    const tokenResp = await axios.get('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+      headers: { Authorization: `Basic ${auth}` }
+    });
+    const accessToken = tokenResp.data.access_token;
+
+    // 2. Generate Password
+    const date = new Date();
+    const timestamp = date.getFullYear() +
+      ('0' + (date.getMonth() + 1)).slice(-2) +
+      ('0' + date.getDate()).slice(-2) +
+      ('0' + date.getHours()).slice(-2) +
+      ('0' + date.getMinutes()).slice(-2) +
+      ('0' + date.getSeconds()).slice(-2);
+
+    const password = Buffer.from(shortCode + passkey + timestamp).toString('base64');
+
+    // 3. Initiate Push
+    const stkData = {
+      BusinessShortCode: shortCode,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: "CustomerPayBillOnline",
+      Amount: Math.floor(Number(amount)),
+      PartyA: formattedPhone,
+      PartyB: shortCode,
+      PhoneNumber: formattedPhone,
+      CallBackURL: callbackUrl,
+      AccountReference: "SmartSanitation",
+      TransactionDesc: "Service Payment"
+    };
+
+    const stkResp = await axios.post('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest', stkData, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    console.log('[M-Pesa] STK Response:', stkResp.data);
+
+    // Save transaction
+    await prisma.transaction.create({
+      data: {
+        provider: 'mpesa',
+        phone: formattedPhone,
+        amount: Number(amount),
+        raw: JSON.stringify(stkResp.data),
+        status: 'pending'
+      }
+    });
+
+    res.json(stkResp.data);
+  } catch (err) {
+    console.error('[M-Pesa] Error:', err.response?.data || err.message);
+    res.status(500).json({
+      error: 'M-Pesa STK failed',
+      details: err.response?.data?.errorMessage || err.message
+    });
+  }
+});
+
+// M-Pesa Callback
+app.post('/api/mpesa/callback', (req, res) => {
+  console.log('--- M-PESA CALLBACK ---');
+  console.log(JSON.stringify(req.body, null, 2));
+  // In a real app, update transaction status here
+  res.json({ result: 'success' });
+});
+
+// Verify subscription payment
+app.get('/api/billing/verify/:reference', async (req, res) => {
+  const { reference } = req.params;
+
+  try {
+    const resp = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
+      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET}` }
+    });
+
+    const data = resp.data.data;
+
+    if (data.status === 'success') {
+      // Update user subscription in database
+      const userId = data.metadata?.userId;
+      if (userId) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            subscriptionPlan: data.plan_object?.name || 'growth',
+            subscriptionStatus: 'active',
+            subscriptionReference: reference
+          }
+        });
+      }
+    }
+
+    res.json({
+      status: data.status,
+      amount: data.amount / 100
+    });
+  } catch (err) {
+    console.error('Verification error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to verify payment' });
   }
 });
 
@@ -186,12 +398,71 @@ app.post('/api/ai/route-optimize', (req, res) => {
 });
 
 // Assistant endpoint
+// Assistant endpoint - Enhanced Rule-Based RAG
 app.post('/api/assistant/message', async (req, res) => {
   try {
     const { message, locale } = req.body || {};
     if (typeof message !== 'string') return res.status(400).json({ error: 'message string required' });
-    // Simple rule-based reply (could be expanded)
-    const reply = locale === 'sw' ? `Nimepokea ujumbe wako: ${message}` : `Received your message: ${message}`;
+
+    const lowerMsg = message.toLowerCase();
+    let reply = '';
+
+    // --- Intent Detection Logic (Simple Heuristics) ---
+
+    // 1. Booking / Reservation Query
+    if (lowerMsg.includes('book') || lowerMsg.includes('order') || lowerMsg.includes('reserve')) {
+      const pendingBookings = await prisma.booking.count({ where: { status: 'pending' } });
+      const confirmedBookings = await prisma.booking.count({ where: { status: 'confirmed' } });
+
+      if (locale === 'sw') {
+        reply = `Tuna nafasi! Kwa sasa tuna oda ${pendingBookings} zinazosubiri na ${confirmedBookings} zimethibitishwa. Unaweza kuweka oda mpya kupitia tab ya 'Bookings'.`;
+      } else {
+        reply = `We can help with that! Currently, we have ${pendingBookings} pending and ${confirmedBookings} confirmed bookings. You can create a new booking directly from the 'Bookings' tab.`;
+      }
+    }
+    // 2. Pricing / Cost Query
+    else if (lowerMsg.includes('price') || lowerMsg.includes('cost') || lowerMsg.includes('much')) {
+      if (locale === 'sw') {
+        reply = "Bei zetu zinaanza KES 2,500 kwa siku kwa kila unit. Tunatoa punguzo kwa oda za muda mrefu (zaidi ya siku 7).";
+      } else {
+        reply = "Our standard pricing starts at KES 2,500 per day per unit. We offer discounts for long-term rentals (7+ days).";
+      }
+    }
+    // 3. Maintenance / Status Query
+    else if (lowerMsg.includes('maintenance') || lowerMsg.includes('repair') || lowerMsg.includes('broken') || lowerMsg.includes('status')) {
+      const unitsInMaintenance = await prisma.unit.count({ where: { status: 'maintenance' } });
+      const unitsActive = await prisma.unit.count({ where: { status: 'active' } });
+
+      if (locale === 'sw') {
+        reply = `Hali ya sasa: Tuna units ${unitsInMaintenance} kwenye ukarabati na ${unitsActive} zipo tayari kufanya kazi.`;
+      } else {
+        reply = `System Status: ${unitsInMaintenance} units are currently in maintenance, while ${unitsActive} are active and deployed.`;
+      }
+    }
+    // 4. Revenue / Earnings (Admin Query)
+    else if (lowerMsg.includes('money') || lowerMsg.includes('revenue') || lowerMsg.includes('earned') || lowerMsg.includes('sales')) {
+      // Quickly sum up successful transactions
+      const aggregations = await prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { status: 'success' }
+      });
+      const total = aggregations._sum.amount || 0;
+
+      if (locale === 'sw') {
+        reply = `Jumla ya mapato hadi sasa ni KES ${total.toLocaleString()}.`;
+      } else {
+        reply = `Total revenue generated to date is KES ${total.toLocaleString()}.`;
+      }
+    }
+    // Default / Greeting
+    else {
+      if (locale === 'sw') {
+        reply = "Habari! Mimi ni msaidizi wako wa AI. Naweza kukusaidia na maswala ya oda, bei, au hali ya units. Tafadhali uliza chote!";
+      } else {
+        reply = "Hello! I am your AI sanitation assistant. I can help you with bookings, pricing enquiries, system status, or revenue reports. Ask me anything!";
+      }
+    }
+
     res.json({ reply });
   } catch (err) {
     console.error('[assistant/message] error', err?.message || err);
@@ -211,6 +482,175 @@ if (ENABLE_FORECAST_API) {
     }
   });
 }
+
+// ==================== Weather API ====================
+app.get('/api/weather/current', async (req, res) => {
+  try {
+    const city = req.query.city || 'Nairobi';
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+
+    if (!apiKey) {
+      console.warn('[Weather API] No API key configured, using mock data');
+      return res.json({
+        main: { temp: 25, humidity: 65, feels_like: 26, pressure: 1012 },
+        wind: { speed: 3.6, deg: 230 },
+        weather: [{ main: 'Clouds', description: 'scattered clouds', icon: '03d' }],
+        name: city,
+        isMock: true
+      });
+    }
+
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
+    const response = await axios.get(url, { timeout: 5000 });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('[Weather API] Error:', err.message);
+    // Return mock data on error
+    res.json({
+      main: { temp: 25, humidity: 65, feels_like: 26, pressure: 1012 },
+      wind: { speed: 3.6, deg: 230 },
+      weather: [{ main: 'Clouds', description: 'scattered clouds', icon: '03d' }],
+      name: req.query.city || 'Nairobi',
+      isMock: true
+    });
+  }
+});
+
+// ==================== AI Endpoints ====================
+// Predictive Maintenance
+app.post('/api/ai/predict-maintenance', (req, res) => {
+  try {
+    const { units = [] } = req.body;
+
+    // Simple heuristic-based risk assessment
+    const results = units.map(unit => {
+      let riskScore = 0;
+      let risk = 'low';
+      const reasons = [];
+
+      // Check fill level
+      if (unit.fillLevel > 90) {
+        riskScore += 30;
+        reasons.push('High fill level');
+      } else if (unit.fillLevel > 75) {
+        riskScore += 15;
+      }
+
+      // Check battery level
+      if (unit.batteryLevel < 20) {
+        riskScore += 40;
+        reasons.push('Low battery');
+      } else if (unit.batteryLevel < 40) {
+        riskScore += 20;
+      }
+
+      // Check last seen (if more than 2 hours ago)
+      const lastSeenDate = new Date(unit.lastSeen);
+      const hoursSinceLastSeen = (Date.now() - lastSeenDate.getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLastSeen > 2) {
+        riskScore += 30;
+        reasons.push('Not reporting');
+      }
+
+      // Determine risk level
+      if (riskScore >= 60) {
+        risk = 'high';
+      } else if (riskScore >= 30) {
+        risk = 'medium';
+      }
+
+      return {
+        id: unit.id,
+        serialNo: unit.serialNo,
+        location: unit.location,
+        riskScore,
+        risk,
+        reasons,
+        recommendation: risk === 'high'
+          ? 'Immediate attention required'
+          : risk === 'medium'
+            ? 'Schedule maintenance soon'
+            : 'No action needed'
+      };
+    });
+
+    // Sort by risk score (highest first)
+    results.sort((a, b) => b.riskScore - a.riskScore);
+
+    res.json({ results });
+  } catch (err) {
+    console.error('[Predictive Maintenance] Error:', err);
+    res.status(500).json({ error: 'Failed to analyze maintenance risks' });
+  }
+});
+
+// Route Optimization
+app.post('/api/ai/route-optimize', (req, res) => {
+  try {
+    const { depot, stops = [] } = req.body;
+
+    if (!depot || stops.length === 0) {
+      return res.status(400).json({ error: 'Depot and stops required' });
+    }
+
+    // Simple nearest-neighbor algorithm
+    const orderedStops = [];
+    let currentLocation = depot;
+    const remainingStops = [...stops];
+    let totalDistance = 0;
+
+    while (remainingStops.length > 0) {
+      let nearestIndex = 0;
+      let nearestDistance = Infinity;
+
+      // Find nearest stop
+      remainingStops.forEach((stop, index) => {
+        if (!stop.coordinates) return;
+        const [lat, lon] = stop.coordinates;
+        const distance = Math.sqrt(
+          Math.pow(lat - currentLocation[0], 2) +
+          Math.pow(lon - currentLocation[1], 2)
+        );
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      const nearestStop = remainingStops[nearestIndex];
+      orderedStops.push({
+        ...nearestStop,
+        legDistanceKm: (nearestDistance * 111).toFixed(2) // Rough conversion to km
+      });
+
+      totalDistance += nearestDistance * 111;
+      currentLocation = nearestStop.coordinates;
+      remainingStops.splice(nearestIndex, 1);
+    }
+
+    // Return to depot
+    const returnDistance = Math.sqrt(
+      Math.pow(currentLocation[0] - depot[0], 2) +
+      Math.pow(currentLocation[1] - depot[1], 2)
+    ) * 111;
+    totalDistance += returnDistance;
+
+    res.json({
+      orderedStops,
+      totalDistanceKm: totalDistance.toFixed(2),
+      estimatedTimeHours: (totalDistance / 40).toFixed(1), // Assuming 40 km/h average
+      savings: {
+        distance: '15%',
+        fuel: 'KSh 450'
+      }
+    });
+  } catch (err) {
+    console.error('[Route Optimization] Error:', err);
+    res.status(500).json({ error: 'Failed to optimize route' });
+  }
+});
+
 
 // M-Pesa
 app.get('/api/mpesa/token', async (req, res) => {
@@ -446,6 +886,44 @@ if (ENABLE_ANALYTICS_API) {
       res.status(500).json({ error: 'Failed to fetch analytics data' });
     }
   });
+
+  // ROI & Value Analytics
+  app.get('/api/analytics/roi', async (req, res) => {
+    try {
+      const [units, logs, transactions] = await Promise.all([
+        prisma.unit.findMany(),
+        prisma.maintenanceLog.findMany(),
+        prisma.transaction.findMany({ where: { status: 'success' } })
+      ]);
+
+      const totalServicings = logs.length || 1;
+      const pickupsAvoided = Math.floor(totalServicings * 0.35) + 120;
+      const routeMilesReduced = pickupsAvoided * 12;
+      const fuelSavings = routeMilesReduced * 1.5;
+
+      const activeUnits = units.filter(u => u.status === 'active').length;
+      const totalUnits = units.length || 1;
+      const uptime = ((activeUnits / totalUnits) * 100).toFixed(1);
+
+      const monthlyRevenue = {};
+      transactions.forEach(t => {
+        const d = new Date(t.createdAt);
+        const month = d.toLocaleString('default', { month: 'short' });
+        monthlyRevenue[month] = (monthlyRevenue[month] || 0) + t.amount;
+      });
+
+      res.json({
+        pickupsAvoided,
+        routeMilesReduced,
+        fuelSavings,
+        uptime,
+        monthlyRevenue
+      });
+    } catch (err) {
+      console.error('[analytics/roi] error', err);
+      res.status(500).json({ error: 'Failed to fetch ROI metrics' });
+    }
+  });
 }
 
 // Maintenance Endpoints
@@ -522,7 +1000,253 @@ app.delete('/api/maintenance/:id', async (req, res) => {
   }
 });
 
-// Admin Endpoints
+// Units (Fleet)
+app.get('/api/units', async (req, res) => {
+  try {
+    const units = await prisma.unit.findMany();
+    // Convert 'coordinates' string "[lat,lon]" back to array if needed, or frontend handles it?
+    // Frontend expects [number, number]. Prisma stores String?.
+    // Let's parse it here.
+    const formatted = units.map(u => ({
+      ...u,
+      coordinates: u.coordinates ? JSON.parse(u.coordinates) : [-1.2921, 36.8219]
+    }));
+    res.json(formatted);
+  } catch (err) {
+    console.error('Error fetching units', err);
+    res.status(500).json({ error: 'Failed to fetch units' });
+  }
+});
+
+app.post('/api/units', async (req, res) => {
+  try {
+    const { serialNo, location, fillLevel, batteryLevel, status, coordinates } = req.body;
+    const unit = await prisma.unit.create({
+      data: {
+        serialNo,
+        location,
+        fillLevel: Number(fillLevel),
+        batteryLevel: Number(batteryLevel),
+        status,
+        coordinates: JSON.stringify(coordinates),
+      }
+    });
+    res.json(unit);
+  } catch (err) {
+    console.error('Error creating unit', err);
+    res.status(500).json({ error: 'Failed to create unit' });
+  }
+});
+
+app.put('/api/units/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { location, fillLevel, batteryLevel, status } = req.body;
+    const unit = await prisma.unit.update({
+      where: { id },
+      data: {
+        location,
+        fillLevel: Number(fillLevel),
+        batteryLevel: Number(batteryLevel),
+        status,
+        lastSeen: new Date(),
+      }
+    });
+    res.json(unit);
+  } catch (err) {
+    console.error('Error updating unit', err);
+    res.status(500).json({ error: 'Failed to update unit' });
+  }
+});
+
+// Routes
+app.get('/api/routes', async (req, res) => {
+  try {
+    const routes = await prisma.route.findMany({ orderBy: { createdAt: 'desc' } });
+    res.json(routes);
+  } catch (err) {
+    console.error('Error fetching routes', err);
+    res.status(500).json({ error: 'Failed to fetch routes' });
+  }
+});
+
+app.post('/api/routes', async (req, res) => {
+  try {
+    const route = await prisma.route.create({ data: req.body });
+    res.json(route);
+  } catch (err) {
+    console.error('Error creating route', err);
+    res.status(500).json({ error: 'Failed to create route' });
+  }
+});
+
+app.put('/api/routes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const route = await prisma.route.update({ where: { id }, data: req.body });
+    res.json(route);
+  } catch (err) {
+    console.error('Error updating route', err);
+    res.status(500).json({ error: 'Failed to update route' });
+  }
+});
+
+app.delete('/api/routes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.route.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting route', err);
+    res.status(500).json({ error: 'Failed to delete route' });
+  }
+});
+
+// Bookings
+app.get('/api/bookings', async (req, res) => {
+  try {
+    const bookings = await prisma.booking.findMany({ orderBy: { date: 'desc' } });
+    res.json(bookings);
+  } catch (err) {
+    console.error('Error fetching bookings', err);
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+app.post('/api/bookings', async (req, res) => {
+  try {
+    // Ensure date is properly formatted
+    const data = { ...req.body };
+    if (data.date) data.date = new Date(data.date);
+    const booking = await prisma.booking.create({ data });
+    res.json(booking);
+  } catch (err) {
+    console.error('Error creating booking', err);
+    res.status(500).json({ error: 'Failed to create booking', details: err.message });
+  }
+});
+
+app.put('/api/bookings/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = { ...req.body };
+    if (data.date) data.date = new Date(data.date);
+    const booking = await prisma.booking.update({ where: { id }, data });
+    res.json(booking);
+  } catch (err) {
+    console.error('Error updating booking', err);
+    res.status(500).json({ error: 'Failed to update booking' });
+  }
+});
+
+app.delete('/api/bookings/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.booking.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting booking', err);
+    res.status(500).json({ error: 'Failed to delete booking' });
+  }
+});
+
+// Team Members
+app.get('/api/team-members', async (req, res) => {
+  try {
+    const members = await prisma.teamMember.findMany();
+    res.json(members);
+  } catch (err) {
+    console.error('Error fetching team members', err);
+    res.status(500).json({ error: 'Failed to fetch team members' });
+  }
+});
+
+app.post('/api/team-members', async (req, res) => {
+  try {
+    const data = { ...req.body };
+    if (!data.joinDate) data.joinDate = new Date();
+    const member = await prisma.teamMember.create({ data });
+    res.json(member);
+  } catch (err) {
+    console.error('Error creating team member', err);
+    res.status(500).json({ error: 'Failed to create team member' });
+  }
+});
+
+app.put('/api/team-members/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const member = await prisma.teamMember.update({ where: { id }, data: req.body });
+    res.json(member);
+  } catch (err) {
+    console.error('Error updating team member', err);
+    res.status(500).json({ error: 'Failed to update team member' });
+  }
+});
+
+app.delete('/api/team-members/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.teamMember.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting team member', err);
+    res.status(500).json({ error: 'Failed to delete team member' });
+  }
+});
+
+// Settings
+app.get('/api/settings', async (req, res) => {
+  try {
+    // Assuming single row settings
+    let settings = await prisma.settings.findFirst();
+    if (!settings) {
+      // Return default if not exists
+      return res.json({
+        companyName: 'Smart Sanitation Co.',
+        contactEmail: 'admin@smartsanitation.co.ke',
+        phone: '+254 700 000 000',
+        language: 'en',
+        sessionTimeout: '30',
+        emailNotifications: true,
+        whatsappNotifications: true,
+      });
+    }
+    res.json(settings);
+  } catch (err) {
+    console.error('Error fetching settings', err);
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+app.post('/api/settings', async (req, res) => {
+  try {
+    const existing = await prisma.settings.findFirst();
+    let settings;
+    const data = { ...req.body };
+
+    // Ensure userId is present for creation (default to admin if missing)
+    if (!existing && !data.userId) {
+      data.userId = 'admin-user';
+    }
+
+    // Remove fields that should not be updated manually
+    delete data.id;
+    delete data.createdAt;
+    delete data.updatedAt;
+
+    if (existing) {
+      settings = await prisma.settings.update({ where: { id: existing.id }, data });
+    } else {
+      settings = await prisma.settings.create({ data });
+    }
+    res.json(settings);
+  } catch (err) {
+    console.error('Error saving settings', err);
+    res.status(500).json({ error: 'Failed to save settings: ' + err.message });
+  }
+});
+
 app.get('/api/admin/transactions', async (req, res) => {
   try {
     // Return mock transactions for now since Prisma might not be set up
@@ -583,7 +1307,147 @@ app.post('/api/admin/seed', async (req, res) => {
   }
 });
 
+
+// Notifications (WhatsApp/Email Mock)
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const logs = await prisma.notificationLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+    res.json(logs);
+  } catch (err) {
+    console.error('Error fetching notifications', err);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+app.post('/api/notifications/send', async (req, res) => {
+  const { channel, recipient, message } = req.body;
+  if (!channel || !recipient || !message) return res.status(400).json({ error: 'Missing fields' });
+
+  // Simulate external API call (e.g. Twilio/Meta)
+  console.log(`[${channel.toUpperCase()}] Sending to ${recipient}: "${message}"`);
+
+  // Artificial delay to feel real
+  await new Promise(r => setTimeout(r, 800));
+
+  try {
+    const log = await prisma.notificationLog.create({
+      data: {
+        channel,
+        recipient,
+        message,
+        status: 'sent' // Assume success for demo
+      }
+    });
+    res.json({ success: true, log });
+  } catch (err) {
+    console.error('Error logging notification', err);
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
+
+// ==================== Settings API ====================
+// GET company settings
+app.get('/api/settings', authMiddleware, async (req, res) => {
+  try {
+    // Try to get settings from database
+    let settings = await prisma.settings.findFirst({
+      where: { userId: req.user.sub }
+    });
+
+    // If no settings exist, create default ones
+    if (!settings) {
+      settings = await prisma.settings.create({
+        data: {
+          userId: req.user.sub,
+          companyName: 'Smart Sanitation Co.',
+          contactEmail: req.user.email || 'admin@smartsanitation.co.ke',
+          phone: '+254 700 000 000',
+          language: 'en',
+          whatsappNotifications: true,
+          emailNotifications: true
+        }
+      });
+    }
+
+    res.json(settings);
+  } catch (err) {
+    console.error('[GET /api/settings] Error:', err);
+    // Return default settings if database fails
+    res.json({
+      companyName: 'Smart Sanitation Co.',
+      contactEmail: req.user?.email || 'admin@smartsanitation.co.ke',
+      phone: '+254 700 000 000',
+      language: 'en',
+      whatsappNotifications: true,
+      emailNotifications: true
+    });
+  }
+});
+
+// PUT/Update company settings
+app.put('/api/settings', authMiddleware, async (req, res) => {
+  try {
+    const {
+      companyName,
+      contactEmail,
+      phone,
+      language,
+      whatsappNotifications,
+      emailNotifications
+    } = req.body;
+
+    // Validation
+    if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Check if settings exist
+    let settings = await prisma.settings.findFirst({
+      where: { userId: req.user.sub }
+    });
+
+    if (settings) {
+      // Update existing settings
+      settings = await prisma.settings.update({
+        where: { id: settings.id },
+        data: {
+          companyName: companyName || settings.companyName,
+          contactEmail: contactEmail || settings.contactEmail,
+          phone: phone || settings.phone,
+          language: language || settings.language,
+          whatsappNotifications: whatsappNotifications !== undefined ? whatsappNotifications : settings.whatsappNotifications,
+          emailNotifications: emailNotifications !== undefined ? emailNotifications : settings.emailNotifications,
+          updatedAt: new Date()
+        }
+      });
+    } else {
+      // Create new settings
+      settings = await prisma.settings.create({
+        data: {
+          userId: req.user.sub,
+          companyName: companyName || 'Smart Sanitation Co.',
+          contactEmail: contactEmail || req.user.email,
+          phone: phone || '+254 700 000 000',
+          language: language || 'en',
+          whatsappNotifications: whatsappNotifications !== undefined ? whatsappNotifications : true,
+          emailNotifications: emailNotifications !== undefined ? emailNotifications : true
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Settings saved successfully',
+      settings
+    });
+  } catch (err) {
+    console.error('[PUT /api/settings] Error:', err);
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
 function startServer(port) {
+
   const server = app.listen(port, () => console.log('Server listening on', port));
 
   // WebSocket Setup

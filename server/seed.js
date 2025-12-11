@@ -3,70 +3,95 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const prisma = new PrismaClient();
 
+
 async function main() {
-    // Use environment variable or generate a random password
-    const adminPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex');
-
-    if (!process.env.ADMIN_PASSWORD) {
-        console.log('⚠️  No ADMIN_PASSWORD environment variable set.');
-        console.log('📝 Generated random admin password:', adminPassword);
-        console.log('🔐 Please save this password securely!');
-    }
-
+    // Admin User
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const hasedPassword = await bcrypt.hash(adminPassword, 10);
     const adminUser = await prisma.user.upsert({
-        where: { email: 'admin@example.com' },
+        where: { email: 'admin@smartsanitation.co.ke' },
         update: {},
         create: {
-            email: 'admin@example.com',
-            password: await bcrypt.hash(adminPassword, 10),
+            email: 'admin@smartsanitation.co.ke',
+            password: hasedPassword,
             name: 'Admin User',
             role: 'admin',
         },
     });
     console.log('Created admin user:', adminUser);
 
-    const unit = await prisma.unit.create({
-        data: {
-            serialNo: 'UNIT-001',
-            location: 'Main Campus',
-            fillLevel: 45,
-            batteryLevel: 80,
-            status: 'active',
-        },
-    });
-    console.log('Created unit:', unit);
+    // Units
+    const unitsData = [
+        { serialNo: 'ST-001', location: 'Westlands', fillLevel: 85, batteryLevel: 92, status: 'active', coordinates: JSON.stringify([-1.2641, 36.8078]) },
+        { serialNo: 'ST-002', location: 'CBD', fillLevel: 45, batteryLevel: 78, status: 'active', coordinates: JSON.stringify([-1.2921, 36.8219]) },
+        { serialNo: 'ST-003', location: 'Karen', fillLevel: 92, batteryLevel: 15, status: 'maintenance', coordinates: JSON.stringify([-1.3197, 36.6859]) },
+        { serialNo: 'ST-004', location: 'Kilimani', fillLevel: 23, batteryLevel: 88, status: 'active', coordinates: JSON.stringify([-1.2906, 36.782]) },
+    ];
 
-    const booking = await prisma.booking.create({
-        data: {
-            customerId: adminUser.id,
-            location: 'Main Campus',
-            units: 2,
-            date: new Date(),
-            duration: 7,
-            status: 'pending',
-        },
-    });
-    console.log('Created booking:', booking);
+    for (const u of unitsData) {
+        await prisma.unit.upsert({
+            where: { serialNo: u.serialNo },
+            update: {},
+            create: u
+        });
+    }
+    console.log('Seeded units');
 
-    const transaction = await prisma.transaction.create({
-        data: {
-            provider: 'paystack',
-            email: adminUser.email,
-            amount: 150.0,
-            status: 'success',
-        },
-    });
-    console.log('Created transaction:', transaction);
+    // Routes
+    // Routes
+    const routeCheck = await prisma.route.count();
+    if (routeCheck === 0) {
+        const u1 = await prisma.unit.findUnique({ where: { serialNo: 'ST-001' } });
+        const u2 = await prisma.unit.findUnique({ where: { serialNo: 'ST-002' } });
+        const u3 = await prisma.unit.findUnique({ where: { serialNo: 'ST-003' } });
 
-    const maintenanceLog = await prisma.maintenanceLog.create({
+        await prisma.route.createMany({
+            data: [
+                { technician: 'John Kamau', units: 1, status: 'active', estimatedTime: '2.5 hrs', priority: 'high', unitId: u1?.id },
+                { technician: 'Mary Wanjiku', units: 1, status: 'pending', estimatedTime: '1.8 hrs', priority: 'medium', unitId: u2?.id },
+                { technician: 'Peter Ochieng', units: 1, status: 'completed', estimatedTime: '3.2 hrs', priority: 'low', unitId: u3?.id },
+            ]
+        });
+        console.log('Seeded routes');
+    }
+
+    // Bookings
+    const bookingsData = [
+        { customer: 'Safari Construction', unit: 'ST-001', date: new Date('2024-01-15'), duration: '3 days', amount: 15000, status: 'confirmed', paymentStatus: 'paid' },
+        { customer: 'Nairobi Events Co.', unit: 'ST-002', date: new Date('2024-01-16'), duration: '1 day', amount: 8000, status: 'pending', paymentStatus: 'pending' },
+        { customer: 'City Council', unit: 'ST-004', date: new Date('2024-01-17'), duration: '7 days', amount: 35000, status: 'confirmed', paymentStatus: 'paid' },
+    ];
+    for (const b of bookingsData) {
+        // Create simple
+        await prisma.booking.create({ data: b });
+    }
+    console.log('Seeded bookings');
+
+    // Team Members
+    const teamData = [
+        { name: 'John Kamau', role: 'Fleet Manager', email: 'john@company.com', phone: '+254712345678', status: 'active', joinDate: new Date('2023-06-15') },
+        { name: 'Mary Wanjiku', role: 'Field Technician', email: 'mary@company.com', phone: '+254723456789', status: 'active', joinDate: new Date('2023-08-20') },
+        { name: 'Peter Ochieng', role: 'Route Coordinator', email: 'peter@company.com', phone: '+254734567890', status: 'active', joinDate: new Date('2023-09-10') },
+        { name: 'Grace Akinyi', role: 'Customer Support', email: 'grace@company.com', phone: '+254745678901', status: 'inactive', joinDate: new Date('2023-11-05') },
+    ];
+    for (const t of teamData) {
+        await prisma.teamMember.create({ data: t });
+    }
+    console.log('Seeded team members');
+
+    // Settings
+    await prisma.settings.create({
         data: {
-            unitId: unit.id,
-            type: 'routine',
-            description: 'Routine check-up',
-            scheduledDate: new Date(),
-        },
+            companyName: 'Smart Sanitation Co.',
+            contactEmail: 'admin@smartsanitation.co.ke',
+            phone: '+254 700 000 000',
+            language: 'en',
+            sessionTimeout: '30',
+            emailNotifications: true,
+            whatsappNotifications: true,
+        }
     });
-    console.log('Created maintenance log:', maintenanceLog);
+    console.log('Seeded settings');
 }
 
 main()

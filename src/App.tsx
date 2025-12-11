@@ -6,7 +6,7 @@ import Logout from './Logout';
 import Notifications from './Notifications';
 import Profile from './Profile';
 import Dashboard from './components/Dashboard';
-import Payments from './Payments';
+
 import AdminTransactions from './AdminTransactions';
 import ProtectedLayout from './ProtectedLayout';
 import Insights from './Insights';
@@ -26,7 +26,7 @@ function App() {
         {/* Protected routes share the same layout (Navigation + Outlet) */}
         <Route element={<ProtectedLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/payments" element={<Payments />} />
+
           <Route path="/insights" element={<Insights />} />
           <Route path="/value" element={<Value />} />
           <Route path="/assistant" element={<Assistant />} />

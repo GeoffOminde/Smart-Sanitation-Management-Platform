@@ -95,64 +95,148 @@ const Analytics = () => {
         ],
     };
 
-    return (
-        <div className="space-y-6">
-            <h2 className="text-xl font-bold text-gray-900">Advanced Analytics</h2>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
-                    <div className="p-3 bg-green-100 rounded-full mr-4">
-                        <DollarSign className="w-6 h-6 text-green-600" />
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500">Total Revenue</p>
-                        <p className="text-xl font-bold">KES {data.revenue.data.reduce((a: any, b: any) => a + b, 0).toLocaleString()}</p>
-                    </div>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
-                    <div className="p-3 bg-blue-100 rounded-full mr-4">
-                        <Users className="w-6 h-6 text-blue-600" />
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500">Total Bookings</p>
-                        <p className="text-xl font-bold">{data.bookings.confirmed + data.bookings.pending + data.bookings.cancelled}</p>
-                    </div>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
-                    <div className="p-3 bg-orange-100 rounded-full mr-4">
-                        <Wrench className="w-6 h-6 text-orange-600" />
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500">Pending Maintenance</p>
-                        <p className="text-xl font-bold">{data.maintenance.pending}</p>
+    return (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Header / Stats Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg shadow-green-500/20 relative overflow-hidden group hover:scale-[1.02] transition-transform">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-6 -mt-6"></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <p className="text-green-100 font-medium text-sm uppercase tracking-wide">Total Revenue</p>
+                                <h3 className="text-3xl font-extrabold mt-1">KES {data.revenue.data.reduce((a: any, b: any) => a + b, 0).toLocaleString()}</h3>
+                            </div>
+                            <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
+                                <DollarSign className="w-6 h-6 text-white" />
+                            </div>
+                        </div>
+                        <p className="mt-4 text-xs text-green-100 font-medium">Net earnings this period</p>
                     </div>
                 </div>
-                <div className="bg-white p-4 rounded-lg shadow border flex items-center">
-                    <div className="p-3 bg-purple-100 rounded-full mr-4">
-                        <TrendingUp className="w-6 h-6 text-purple-600" />
+
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl p-6 text-white shadow-lg shadow-blue-500/20 relative overflow-hidden group hover:scale-[1.02] transition-transform">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-6 -mt-6"></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <p className="text-blue-100 font-medium text-sm uppercase tracking-wide">Total Bookings</p>
+                                <h3 className="text-3xl font-extrabold mt-1">{data.bookings.confirmed + data.bookings.pending + data.bookings.cancelled}</h3>
+                            </div>
+                            <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
+                                <Users className="w-6 h-6 text-white" />
+                            </div>
+                        </div>
+                        <p className="mt-4 text-xs text-blue-100 font-medium">+15% vs last month</p>
                     </div>
-                    <div>
-                        <p className="text-sm text-gray-500">Growth</p>
-                        <p className="text-xl font-bold">+12%</p>
+                </div>
+
+                <div className="bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-500/20 relative overflow-hidden group hover:scale-[1.02] transition-transform">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-6 -mt-6"></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <p className="text-orange-100 font-medium text-sm uppercase tracking-wide">Pending Tasks</p>
+                                <h3 className="text-3xl font-extrabold mt-1">{data.maintenance.pending}</h3>
+                            </div>
+                            <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
+                                <Wrench className="w-6 h-6 text-white" />
+                            </div>
+                        </div>
+                        <p className="mt-4 text-xs text-orange-100 font-medium">Maintenance jobs requiring attention</p>
+                    </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-500 to-violet-600 rounded-2xl p-6 text-white shadow-lg shadow-purple-500/20 relative overflow-hidden group hover:scale-[1.02] transition-transform">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-6 -mt-6"></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <p className="text-purple-100 font-medium text-sm uppercase tracking-wide">Growth</p>
+                                <h3 className="text-3xl font-extrabold mt-1">+12%</h3>
+                            </div>
+                            <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
+                                <TrendingUp className="w-6 h-6 text-white" />
+                            </div>
+                        </div>
+                        <p className="mt-4 text-xs text-purple-100 font-medium">Year-over-Year growth</p>
                     </div>
                 </div>
             </div>
 
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-lg shadow border">
-                    <h3 className="text-lg font-semibold mb-4">Revenue Trend</h3>
-                    <Line options={{ responsive: true, plugins: { legend: { position: 'top' as const } } }} data={revenueChart} />
+            {/* Charts Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Revenue Trend */}
+                <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 min-h-[400px]">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-bold text-gray-900">Revenue Trend</h3>
+                        <button className="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">Last 6 Months</button>
+                    </div>
+                    <div className="h-[320px]">
+                        <Line
+                            options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { position: 'top' as const, labels: { usePointStyle: true, boxWidth: 6 } },
+                                    tooltip: {
+                                        backgroundColor: 'rgba(0,0,0,0.8)',
+                                        padding: 12,
+                                        cornerRadius: 8,
+                                        displayColors: false
+                                    }
+                                },
+                                scales: {
+                                    y: { grid: { color: '#f3f4f6' }, border: { display: false } },
+                                    x: { grid: { display: false }, border: { display: false } }
+                                }
+                            }}
+                            data={revenueChart}
+                        />
+                    </div>
                 </div>
-                <div className="bg-white p-6 rounded-lg shadow border">
-                    <h3 className="text-lg font-semibold mb-4">Booking Status</h3>
-                    <Bar options={{ responsive: true, plugins: { legend: { position: 'top' as const } } }} data={bookingChart} />
+
+                {/* Booking Status */}
+                <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 min-h-[400px]">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-bold text-gray-900">Booking Status</h3>
+                        <button className="text-xs font-semibold text-gray-600 bg-gray-50 px-3 py-1 rounded-lg">Real-time</button>
+                    </div>
+                    <div className="h-[320px]">
+                        <Bar
+                            options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { position: 'top' as const, labels: { usePointStyle: true, boxWidth: 6 } }
+                                },
+                                scales: {
+                                    y: { grid: { color: '#f3f4f6' }, border: { display: false } },
+                                    x: { grid: { display: false }, border: { display: false } }
+                                }
+                            }}
+                            data={bookingChart}
+                        />
+                    </div>
                 </div>
-                <div className="bg-white p-6 rounded-lg shadow border">
-                    <h3 className="text-lg font-semibold mb-4">Maintenance Overview</h3>
-                    <div className="h-64 flex justify-center">
-                        <Doughnut data={maintenanceChart} />
+
+                {/* Maintenance Overview */}
+                <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 lg:col-span-2">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-bold text-gray-900">Maintenance Distribution</h3>
+                    </div>
+                    <div className="h-80 w-full max-w-2xl mx-auto">
+                        <Doughnut
+                            options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { position: 'right' as const, labels: { usePointStyle: true, padding: 20, font: { size: 12 } } }
+                                }
+                            }}
+                            data={maintenanceChart}
+                        />
                     </div>
                 </div>
             </div>

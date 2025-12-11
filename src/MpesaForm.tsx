@@ -31,14 +31,47 @@ const MpesaForm = () => {
   };
 
   return (
-    <div className="bg-white p-6 rounded shadow">
-      <h3 className="text-lg font-semibold mb-4">M-Pesa (STK Push Demo)</h3>
-      <form onSubmit={handleStkPush} className="space-y-3">
-        <input type="tel" placeholder="Phone (2547XXXXXXXX)" value={phone} onChange={e => setPhone(e.target.value)} className="w-full border p-2 rounded" required />
-        <input type="number" placeholder="Amount (KES)" value={amount || ''} onChange={e => setAmount(Number(e.target.value))} className="w-full border p-2 rounded" required />
-        <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded">Initiate STK Push</button>
+    <div className="bg-white p-6 rounded-2xl">
+      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+        <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-green-500/20">
+          MP
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">M-Pesa STK Push</h3>
+          <p className="text-xs text-gray-500">Instant mobile payment</p>
+        </div>
+      </div>
+      <form onSubmit={handleStkPush} className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Phone Number</label>
+          <input
+            type="tel"
+            placeholder="2547XXXXXXXX"
+            value={phone}
+            onChange={e => setPhone(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-all hover:bg-white"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amount (KES)</label>
+          <input
+            type="number"
+            placeholder="1000"
+            value={amount || ''}
+            onChange={e => setAmount(Number(e.target.value))}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-all hover:bg-white"
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-green-500/30 transition-all hover:-translate-y-0.5"
+        >
+          Initiate STK Push
+        </button>
       </form>
-      {message && <p className="mt-3 text-sm text-gray-700">{message}</p>}
+      {message && <div className="mt-4 p-3 bg-blue-50 text-blue-700 text-sm rounded-xl border border-blue-100">{message}</div>}
     </div>
   );
 };

@@ -21,30 +21,47 @@ const PayPalForm = () => {
   };
 
   return (
-    <div className="bg-white p-6 rounded shadow">
-      <h3 className="text-lg font-semibold mb-4">PayPal (Demo)</h3>
-      <form onSubmit={handlePay} className="space-y-3">
-        <input
-          type="email"
-          placeholder="PayPal account email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full border p-2 rounded"
-          required
-        />
-        <input
-          type="number"
-          placeholder="Amount (USD)"
-          value={amount}
-          onChange={(e) => setAmount(Number(e.target.value))}
-          className="w-full border p-2 rounded"
-          required
-        />
-        <button type="submit" className="px-4 py-2 rounded text-white bg-slate-800 hover:bg-slate-900">
+    <div className="bg-white p-6 rounded-2xl">
+      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+        <div className="w-10 h-10 bg-gradient-to-br from-slate-700 to-slate-900 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-slate-500/20">
+          PP
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">PayPal</h3>
+          <p className="text-xs text-gray-500">Global payment solution</p>
+        </div>
+      </div>
+      <form onSubmit={handlePay} className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">PayPal Email</label>
+          <input
+            type="email"
+            placeholder="your@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all hover:bg-white"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amount (USD)</label>
+          <input
+            type="number"
+            placeholder="100"
+            value={amount}
+            onChange={(e) => setAmount(Number(e.target.value))}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all hover:bg-white"
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          className="w-full bg-gradient-to-r from-slate-700 to-slate-900 hover:from-slate-600 hover:to-slate-800 text-white font-bold py-3 rounded-xl shadow-lg shadow-slate-500/30 transition-all hover:-translate-y-0.5"
+        >
           Pay with PayPal
         </button>
       </form>
-      {message && <p className="mt-3 text-sm text-gray-700">{message}</p>}
+      {message && <div className="mt-4 p-3 bg-blue-50 text-blue-700 text-sm rounded-xl border border-blue-100">{message}</div>}
     </div>
   );
 };
