@@ -95,7 +95,16 @@ app.post('/api/auth/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Invalid credentials' });
     const token = generateToken(user);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        subscriptionPlan: user.subscriptionPlan || 'starter'
+      }
+    });
   } catch (err) {
     console.error('Login error', err);
     res.status(500).json({ error: 'Login failed' });
@@ -234,6 +243,9 @@ app.post('/api/mpesa/stk', async (req, res) => {
     const passkey = process.env.MPESA_PASSKEY;
     const shortCode = process.env.MPESA_SHORTCODE || '174379';
     const callbackUrl = process.env.MPESA_CALLBACK_URL || 'http://localhost:3001/api/mpesa/callback';
+    const baseUrl = process.env.MPESA_ENVIRONMENT === 'production'
+      ? 'https://api.safaricom.co.ke'
+      : 'https://sandbox.safaricom.co.ke';
 
     if (!consumerKey || !consumerSecret || !passkey) {
       throw new Error('M-Pesa credentials not configured');
@@ -241,7 +253,7 @@ app.post('/api/mpesa/stk', async (req, res) => {
 
     // 1. Get Token
     const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-    const tokenResp = await axios.get('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+    const tokenResp = await axios.get(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
       headers: { Authorization: `Basic ${auth}` }
     });
     const accessToken = tokenResp.data.access_token;
@@ -272,7 +284,7 @@ app.post('/api/mpesa/stk', async (req, res) => {
       TransactionDesc: "Service Payment"
     };
 
-    const stkResp = await axios.post('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest', stkData, {
+    const stkResp = await axios.post(`${baseUrl}/mpesa/stkpush/v1/processrequest`, stkData, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
 
@@ -380,30 +392,7 @@ app.post('/api/ai/smart-booking/suggest', (req, res) => {
   }
 });
 
-app.post('/api/ai/predict-maintenance', (req, res) => {
-  try {
-    const { units } = req.body || {};
-    if (!Array.isArray(units)) return res.status(400).json({ error: 'units array is required' });
-    const results = AI.predictMaintenance(units);
-    res.json({ results });
-  } catch (err) {
-    console.error('[ai/predict-maintenance] error', err?.message || err);
-    res.status(500).json({ error: 'Failed to predict maintenance' });
-  }
-});
-
-app.post('/api/ai/route-optimize', (req, res) => {
-  try {
-    const { depot, stops } = req.body || {};
-    if (!Array.isArray(depot) || depot.length !== 2) return res.status(400).json({ error: 'depot must be [lat, lon]' });
-    if (!Array.isArray(stops)) return res.status(400).json({ error: 'stops array is required' });
-    const route = AI.routeOptimize({ depot, stops });
-    res.json(route);
-  } catch (err) {
-    console.error('[ai/route-optimize] error', err?.message || err);
-    res.status(500).json({ error: 'Failed to optimize route' });
-  }
-});
+// Duplicate AI endpoints removed (see shared implementation)
 
 // Assistant endpoint
 // Assistant endpoint - Enhanced Rule-Based RAG
@@ -1032,65 +1021,7 @@ app.delete('/api/team-members/:id', async (req, res) => {
 // Settings
 // Duplicate settings endpoints removed (use authenticated versions)
 
-app.get('/api/admin/transactions', async (req, res) => {
-  try {
-    // Return mock transactions for now since Prisma might not be set up
-    const mockTransactions = [
-      {
-        id: '1',
-        provider: 'mpesa',
-        email: 'customer1@example.com',
-        amount: 5000,
-        status: 'completed',
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        reference: 'MPE' + Math.random().toString(36).substr(2, 9).toUpperCase()
-      },
-      {
-        id: '2',
-        provider: 'paystack',
-        email: 'customer2@example.com',
-        amount: 3500,
-        status: 'completed',
-        createdAt: new Date(Date.now() - 172800000).toISOString(),
-        reference: 'PST' + Math.random().toString(36).substr(2, 9).toUpperCase()
-      },
-      {
-        id: '3',
-        provider: 'mpesa',
-        email: 'customer3@example.com',
-        amount: 7200,
-        status: 'pending',
-        createdAt: new Date(Date.now() - 3600000).toISOString(),
-        reference: 'MPE' + Math.random().toString(36).substr(2, 9).toUpperCase()
-      }
-    ];
-    res.json(mockTransactions);
-  } catch (err) {
-    console.error('Error fetching transactions:', err);
-    res.status(500).json({ error: 'Failed to fetch transactions' });
-  }
-});
-
-app.post('/api/admin/seed', async (req, res) => {
-  try {
-    // Generate a demo transaction
-    const demoTransaction = {
-      id: Date.now().toString(),
-      provider: Math.random() > 0.5 ? 'mpesa' : 'paystack',
-      email: `demo${Math.floor(Math.random() * 1000)}@example.com`,
-      amount: Math.floor(Math.random() * 10000) + 1000,
-      status: Math.random() > 0.3 ? 'completed' : 'pending',
-      createdAt: new Date().toISOString(),
-      reference: 'DEMO' + Math.random().toString(36).substr(2, 9).toUpperCase()
-    };
-
-    console.log('Seeded demo transaction:', demoTransaction);
-    res.json({ success: true, transaction: demoTransaction });
-  } catch (err) {
-    console.error('Error seeding transaction:', err);
-    res.status(500).json({ error: 'Failed to seed transaction' });
-  }
-});
+// Duplicate mock admin endpoints removed
 
 
 // Notifications (WhatsApp/Email Mock)
@@ -1228,6 +1159,33 @@ app.put('/api/settings', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[PUT /api/settings] Error:', err);
     res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
+// Notifications
+app.post('/api/notifications/send', async (req, res) => {
+  try {
+    const { channel, recipient, message } = req.body;
+
+    console.log(`[Notification Mock] Sending ${channel} to ${recipient}: ${message}`);
+
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Persist log
+    const log = await prisma.notificationLog.create({
+      data: {
+        channel: channel || 'unknown',
+        recipient: recipient || 'unknown',
+        message: message || '',
+        status: 'sent' // Simulating success
+      }
+    });
+
+    res.json({ success: true, logId: log.id });
+  } catch (err) {
+    console.error('Error sending notification', err);
+    res.status(500).json({ error: 'Failed to send notification' });
   }
 });
 

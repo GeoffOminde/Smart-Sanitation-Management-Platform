@@ -102,6 +102,7 @@ const LiveFleetMap: React.FC<LiveFleetMapProps> = ({ units = [], trucks = [] }) 
                         <Popup>
                             <div className="p-1">
                                 <h3 className="font-bold text-sm text-blue-700">{truck.name}</h3>
+                                <p className="text-xs text-gray-700 mb-0.5">ID: <span className="font-mono font-semibold">{truck.id?.slice(0, 4).toUpperCase()}</span></p>
                                 <p className="text-xs text-gray-600">Role: {truck.role}</p>
                                 <p className="text-xs text-gray-500">Status: {truck.status}</p>
                             </div>

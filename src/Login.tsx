@@ -46,7 +46,7 @@ const Login = () => {
         localStorage.setItem('authToken', data.token);
       }
 
-      login();
+      login(data.user);
       trackNow('login_success');
       navigate('/dashboard');
     } catch (err) {

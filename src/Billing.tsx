@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from './AuthContext';
 import {
     CreditCard,
     CheckCircle,
@@ -24,8 +25,15 @@ import MtnMoneyForm from './MtnMoneyForm';
 
 const Billing: React.FC = () => {
     const { addNotification } = useAppNotifications();
-    const [currentPlan, setCurrentPlan] = useState('growth');
+    const { user } = useAuth();
+    const [currentPlan, setCurrentPlan] = useState('starter');
     const [showUpgrade, setShowUpgrade] = useState(false);
+
+    useEffect(() => {
+        if (user?.subscriptionPlan) {
+            setCurrentPlan(user.subscriptionPlan.toLowerCase());
+        }
+    }, [user]);
 
     // Payment State
     const [selectedMethod, setSelectedMethod] = useState<'mpesa' | 'mtn' | 'airtel' | 'card'>('mpesa');
@@ -73,7 +81,8 @@ const Billing: React.FC = () => {
             price: '$49',
             period: '/mo',
             features: ['Up to 5 Vehicles', 'Basic Route Planning', 'Standard Support'],
-            limit: 'Ideal for small fleets'
+            limit: 'Ideal for small fleets',
+            description: 'Get started with basic tracking and essential fleet tools.'
         },
         {
             id: 'growth',
@@ -82,7 +91,8 @@ const Billing: React.FC = () => {
             period: '/mo',
             features: ['Up to 20 Vehicles', 'Advanced AI Routes', 'Priority Support', 'API Access'],
             popular: true,
-            limit: 'Best for growing companies'
+            limit: 'Best for growing companies',
+            description: 'Includes advanced AI routing and API access for up to 20 vehicles.'
         },
         {
             id: 'enterprise',
@@ -90,7 +100,8 @@ const Billing: React.FC = () => {
             price: 'Custom',
             period: '',
             features: ['Unlimited Vehicles', 'White-labeling', 'Dedicated Account Manager', 'On-premise Deployment'],
-            limit: 'For large organizations'
+            limit: 'For large organizations',
+            description: 'Full-scale solution with dedicated support and unlimited capacity.'
         }
     ];
 
@@ -144,13 +155,13 @@ const Billing: React.FC = () => {
                                     <div className="flex items-center gap-3 mb-4">
                                         <span className="px-3 py-1 bg-green-100 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full">Active Subscription</span>
                                     </div>
-                                    <h3 className="text-4xl font-bold text-gray-900 mb-2">Growth Plan</h3>
+                                    <h3 className="text-4xl font-bold text-gray-900 mb-2">{plans.find(p => p.id === currentPlan)?.name || 'Starter'} Plan</h3>
                                     <p className="text-gray-600 max-w-md">
-                                        Includes advanced AI routing and API access for up to 20 vehicles.
+                                        {plans.find(p => p.id === currentPlan)?.description || 'Includes advanced AI routing and API access.'}
                                     </p>
                                 </div>
                                 <div className="text-right hidden md:block">
-                                    <div className="text-3xl font-bold text-gray-900">$149<span className="text-lg text-gray-500 font-normal">/mo</span></div>
+                                    <div className="text-3xl font-bold text-gray-900">{plans.find(p => p.id === currentPlan)?.price || '$49'}<span className="text-lg text-gray-500 font-normal">{plans.find(p => p.id === currentPlan)?.period || '/mo'}</span></div>
                                     <div className="text-sm text-gray-400 mt-1">Next bill: Jan 01, 2026</div>
                                 </div>
                             </div>
@@ -324,11 +335,13 @@ const Billing: React.FC = () => {
                             {plans.map((plan) => (
                                 <div
                                     key={plan.id}
-                                    className={`rounded-2xl p-6 border-2 flex flex-col relative transition-all duration-300 ${currentPlan === plan.id
-                                        ? 'border-blue-600 bg-blue-50/10'
-                                        : plan.popular
-                                            ? 'border-blue-200 shadow-xl md:scale-105 z-10 bg-white'
-                                            : 'border-gray-100 hover:border-blue-100 bg-white'
+                                    className={`rounded-2xl p-6 border-2 flex flex-col relative transition-all duration-300
+                                        ${plan.popular ? 'md:scale-105 z-10 shadow-xl' : ''}
+                                        ${currentPlan === plan.id
+                                            ? 'border-blue-600 bg-blue-50/50'
+                                            : plan.popular
+                                                ? 'border-blue-200 bg-white'
+                                                : 'border-gray-100 hover:border-blue-100 bg-white'
                                         }`}
                                 >
                                     {plan.popular && (
@@ -376,9 +389,9 @@ const Billing: React.FC = () => {
                                                         method: 'POST',
                                                         headers: { 'Content-Type': 'application/json' },
                                                         body: JSON.stringify({
-                                                            email: 'user@example.com', // TODO: Get from auth context
+                                                            email: user?.email || 'user@example.com',
                                                             planCode: planCodes[plan.id as 'starter' | 'growth'],
-                                                            userId: 'current-user-id' // TODO: Get from auth context
+                                                            userId: user?.id || 'current-user-id'
                                                         })
                                                     });
 

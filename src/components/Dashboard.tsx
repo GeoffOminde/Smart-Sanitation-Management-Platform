@@ -91,6 +91,7 @@ interface Booking {
   amount: number;
   status: 'confirmed' | 'pending' | 'cancelled';
   paymentStatus: 'paid' | 'pending' | 'failed';
+  technicianId?: string;
 }
 
 interface TeamMember {
@@ -380,6 +381,7 @@ Forecast:
   const [formAmount, setFormAmount] = useState<number>(0);
   const [formStatus, setFormStatus] = useState<Booking['status']>('pending');
   const [formPaymentStatus, setFormPaymentStatus] = useState<Booking['paymentStatus']>('pending');
+  const [formBookingTechId, setFormBookingTechId] = useState<string>('');
 
   const [memberModalOpen, setMemberModalOpen] = useState<boolean>(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
@@ -634,6 +636,7 @@ Forecast:
     setFormAmount(0);
     setFormStatus('pending');
     setFormPaymentStatus('pending');
+    setFormBookingTechId('');
     setBookingModalOpen(true);
   };
 
@@ -646,6 +649,7 @@ Forecast:
     setFormAmount(b.amount);
     setFormStatus(b.status);
     setFormPaymentStatus(b.paymentStatus);
+    setFormBookingTechId(b.technicianId || '');
     setBookingModalOpen(true);
   };
 
@@ -666,6 +670,7 @@ Forecast:
       amount: Number(formAmount) || 0,
       status: formStatus,
       paymentStatus: formPaymentStatus,
+      technicianId: formBookingTechId,
     };
 
     try {
@@ -1242,6 +1247,7 @@ Forecast:
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
@@ -1257,6 +1263,11 @@ Forecast:
                 .map((booking) => (
                   <tr key={booking.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{booking.customer}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {booking.technicianId
+                        ? (teamMembers.find(t => t.id === booking.technicianId)?.name || 'Unknown')
+                        : <span className="text-gray-400 italic">Unassigned</span>}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.unit}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.date}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.duration}</td>
@@ -1286,49 +1297,105 @@ Forecast:
 
         {/* Booking modal */}
         {bookingModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-start pt-12 z-[100] p-4 animate-in fade-in duration-200 overflow-y-auto">
-            <div className="bg-white w-11/12 max-w-5xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col h-[85vh]">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-                <h4 className="text-lg font-bold text-gray-900">{editingBookingId ? 'Edit Booking' : 'New Booking'}</h4>
-                <button className="text-gray-400 hover:text-gray-600 transition-colors text-2xl leading-none" type="button" onClick={() => setBookingModalOpen(false)}>
-                  &times;
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+              <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xl font-bold text-gray-900">{editingBookingId ? 'Edit Booking' : 'New Booking'}</h4>
+                  <p className="text-sm text-gray-500 mt-1">Manage reservation details and payment status</p>
+                </div>
+                <button
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors"
+                  type="button"
+                  onClick={() => setBookingModalOpen(false)}
+                >
+                  ×
                 </button>
               </div>
-              <div className="p-6 space-y-4 overflow-y-auto">
+
+              <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Customer Name</label>
-                  <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="e.g. John Doe" value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} />
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Customer Name</label>
+                  <input
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    placeholder="e.g. John Doe"
+                    value={formCustomer}
+                    onChange={(e) => setFormCustomer(e.target.value)}
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Target Unit</label>
-                  <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="e.g. UNIT-001" value={formUnit} onChange={(e) => setFormUnit(e.target.value)} />
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Assign Technician</label>
+                  <select
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    value={formBookingTechId}
+                    onChange={(e) => setFormBookingTechId(e.target.value)}
+                  >
+                    <option value="">Unassigned</option>
+                    {teamMembers.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.id.slice(0, 4).toUpperCase()})</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Target Unit</label>
+                  <input
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    placeholder="e.g. UNIT-001"
+                    value={formUnit}
+                    onChange={(e) => setFormUnit(e.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Start Date</label>
-                    <input type="date" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Start Date</label>
+                    <input
+                      type="date"
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      value={formDate}
+                      onChange={(e) => setFormDate(e.target.value)}
+                    />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Duration</label>
-                    <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="e.g. 3 days" value={formDuration} onChange={(e) => setFormDuration(e.target.value)} />
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Duration</label>
+                    <input
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      placeholder="e.g. 3 days"
+                      value={formDuration}
+                      onChange={(e) => setFormDuration(e.target.value)}
+                    />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Amount (KES)</label>
-                  <input type="number" min={0} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="0.00" value={formAmount} onChange={(e) => setFormAmount(Number(e.target.value))} />
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amount (KES)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    placeholder="0.00"
+                    value={formAmount}
+                    onChange={(e) => setFormAmount(Number(e.target.value))}
+                  />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Booking Status</label>
-                    <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" value={formStatus} onChange={(e) => setFormStatus(e.target.value as Booking['status'])}>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Booking Status</label>
+                    <select
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      value={formStatus}
+                      onChange={(e) => setFormStatus(e.target.value as Booking['status'])}
+                    >
                       <option value="confirmed">Confirmed</option>
                       <option value="pending">Pending</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Payment Status</label>
-                    <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" value={formPaymentStatus} onChange={(e) => setFormPaymentStatus(e.target.value as Booking['paymentStatus'])}>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Payment Status</label>
+                    <select
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      value={formPaymentStatus}
+                      onChange={(e) => setFormPaymentStatus(e.target.value as Booking['paymentStatus'])}
+                    >
                       <option value="paid">Paid</option>
                       <option value="pending">Pending</option>
                       <option value="failed">Failed</option>
@@ -1336,11 +1403,20 @@ Forecast:
                   </div>
                 </div>
               </div>
+
               <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex items-center justify-end gap-3">
-                <button type="button" className="px-5 py-2.5 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all" onClick={() => setBookingModalOpen(false)}>
+                <button
+                  type="button"
+                  className="px-6 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all"
+                  onClick={() => setBookingModalOpen(false)}
+                >
                   Cancel
                 </button>
-                <button type="button" className="px-5 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all hover:-translate-y-0.5" onClick={saveBooking}>
+                <button
+                  type="button"
+                  className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl shadow-lg shadow-blue-500/30 hover:bg-blue-700 hover:-translate-y-0.5 transition-all"
+                  onClick={saveBooking}
+                >
                   {editingBookingId ? 'Update Booking' : 'Create Booking'}
                 </button>
               </div>
@@ -1350,17 +1426,32 @@ Forecast:
 
         {/* Smart Booking */}
         <div className="p-6 border-t space-y-4">
-          <h4 className="text-md font-semibold text-gray-900">Smart Booking</h4>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-            <input type="date" className="border rounded px-3 py-2 text-sm" value={sbDate} onChange={(e) => setSbDate(e.target.value)} />
-            <input type="text" className="border rounded px-3 py-2 text-sm" value={sbLocation} onChange={(e) => setSbLocation(e.target.value)} placeholder="Location" />
-            <input type="number" min={1} className="border rounded px-3 py-2 text-sm" value={sbUnits} onChange={(e) => setSbUnits(Number(e.target.value))} placeholder="# Units" />
-            <input type="number" min={1} className="border rounded px-3 py-2 text-sm" value={sbDuration} onChange={(e) => setSbDuration(Number(e.target.value))} placeholder="Duration (days)" />
-            <div className="flex items-center gap-2">
-              <input type="number" min={0} className="border rounded px-3 py-2 text-sm w-full" value={sbCapacity} onChange={(e) => setSbCapacity(Number(e.target.value))} placeholder="Capacity/day" />
-              <button type="button" onClick={smartSuggest} className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700" disabled={sbLoading}>
-                {sbLoading ? 'Suggesting...' : 'Smart Suggest'}
-              </button>
+          <h4 className="text-md font-semibold text-gray-900 mb-3">Smart Booking Intelligence</h4>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Target Date</label>
+              <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbDate} onChange={(e) => setSbDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Location</label>
+              <input type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbLocation} onChange={(e) => setSbLocation(e.target.value)} placeholder="e.g. Nairobi" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Unit Count</label>
+              <input type="number" min={1} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbUnits} onChange={(e) => setSbUnits(Number(e.target.value))} placeholder="1" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Duration (Days)</label>
+              <input type="number" min={1} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbDuration} onChange={(e) => setSbDuration(Number(e.target.value))} placeholder="1" />
+            </div>
+            <div className="flex flex-col">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Capacity / Day</label>
+              <div className="flex items-center gap-2">
+                <input type="number" min={0} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbCapacity} onChange={(e) => setSbCapacity(Number(e.target.value))} placeholder="80" />
+                <button type="button" onClick={smartSuggest} className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium whitespace-nowrap shadow-md" disabled={sbLoading}>
+                  {sbLoading ? '...' : 'Suggest'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1494,6 +1585,7 @@ Forecast:
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tech ID</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ETA</th>
@@ -1510,6 +1602,9 @@ Forecast:
                       </div>
                       <div className="text-sm font-medium text-gray-900">{route.technician}</div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
+                    {(teamMembers.find(t => t.name === route.technician)?.id || '-').slice(0, 4).toUpperCase()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span
