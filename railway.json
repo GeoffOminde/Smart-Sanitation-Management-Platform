@@ -5,7 +5,7 @@
         "buildCommand": "cd server && npm install && DATABASE_URL=\"postgresql://dummy:dummy@localhost:5432/dummy\" npx prisma generate"
     },
     "deploy": {
-        "startCommand": "cd server && npx prisma migrate deploy && npx prisma db seed && npm start",
+        "startCommand": "cd server && npx prisma db push --accept-data-loss && npx prisma db seed && npm start",
         "restartPolicyType": "ON_FAILURE",
         "restartPolicyMaxRetries": 10
     }
