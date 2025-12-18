@@ -50,3 +50,11 @@ Thumbs.db
 # Testing
 coverage/
 TRASH/
+
+# Database credentials and test files
+server/db-url.txt
+server/test-*.txt
+server/test-*.js
+server/*.db
+server/dev.db/
+server/prisma/dev.db
