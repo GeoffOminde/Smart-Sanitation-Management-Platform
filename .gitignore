@@ -7,19 +7,46 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+server/node_modules
+
+# Build Output
 dist
 dist-ssr
+build
+server/dist
+
+# Environment files (Secrets - NEVER COMMIT)
+.env
+.env.*
+!.env.example
+server/.env
 *.local
 
-# Editor directories and files
+# Backups
+backups/
+*.sql
+*.bak
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-.env
+
+# Agent/AI folders
+.agent/
+.gemini/
+
+# Testing
+coverage/
+TRASH/
