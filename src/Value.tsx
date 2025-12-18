@@ -198,6 +198,57 @@ const Value = () => {
     </div>
   );
 
+  const handleDownload = () => {
+    // 1. Prepare CSV content
+    let csvContent = "data:text/csv;charset=utf-8,";
+
+    // Header
+    csvContent += "Smart Sanitation ROI Report\n";
+    csvContent += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+
+    // KPI Data
+    csvContent += "Key Performance Indicators\n";
+    csvContent += "Metric,Current Value,Trend (vs Last Month)\n";
+    csvContent += `Pickups Avoided,${kpiData.pickupsAvoided.current},${kpiData.pickupsAvoided.trend}%\n`;
+    csvContent += `Route Miles Reduced,${kpiData.routeMilesReduced.current},${kpiData.routeMilesReduced.trend}%\n`;
+    csvContent += `Fuel Savings,${kpiData.fuelSavings.current},${kpiData.fuelSavings.trend}%\n`;
+    csvContent += `Uptime,${kpiData.uptime.current}%,${kpiData.uptime.trend}%\n`;
+
+    // Revenue Data
+    if (chartData?.labels && chartData?.datasets?.[0]?.data) {
+      csvContent += "\nRevenue Trend\n";
+      csvContent += "Month,Revenue\n";
+      chartData.labels.forEach((label: string, index: number) => {
+        const val = chartData.datasets[0].data[index];
+        csvContent += `${label},${val}\n`;
+      });
+    }
+
+    // Cohort Data
+    if (cohortData.length > 0) {
+      csvContent += "\nDetailed Cohort Retention\n";
+      csvContent += "Cohort,Day 7 (%),Day 30 (%),Day 90 (%)\n";
+      cohortData.forEach(row => {
+        csvContent += `${row.cohort},${row.d7},${row.d30},${row.d90}\n`;
+      });
+    }
+
+    // Engagement Data
+    csvContent += "\nUser Engagement\n";
+    csvContent += `WAU,${engagementData.wau}\n`;
+    csvContent += `MAU,${engagementData.mau}\n`;
+    csvContent += `Stickiness,${engagementData.stickiness}%\n`;
+
+    // 2. Encode and Download
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `roi_report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -231,7 +282,11 @@ const Value = () => {
             <button onClick={loadData} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
               <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
-            <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+            <button
+              onClick={handleDownload}
+              title="Download Report"
+              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            >
               <Download className="w-5 h-5" />
             </button>
           </div>
