@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "preinstall": "node -e \"if(!require('fs').existsSync('.env')) require('fs').writeFileSync('.env', 'DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy')\"",
     "build": "prisma generate",
     "postinstall": "prisma generate"
   },
