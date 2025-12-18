@@ -8,6 +8,7 @@ import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useBookings } from '../../contexts/BookingContext';
+import { useSettings } from '../../contexts/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 
 // Form validation schema
@@ -46,10 +47,19 @@ interface BookingFormProps {
 const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
   const navigate = useNavigate();
   const { createBooking, updateBooking, getBooking } = useBookings();
+  const { settings } = useSettings();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [units, setUnits] = useState(mockUnits);
   const [selectedUnit, setSelectedUnit] = useState<any>(null);
+
+  const currencySymbols: Record<string, string> = {
+    'KES': 'KES',
+    'USD': '$',
+    'EUR': '€',
+    'GBP': '£',
+  };
+  const currencySymbol = currencySymbols[settings.currency] || 'KES';
 
   const {
     control,
@@ -72,7 +82,7 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
       status: 'confirmed',
       payment: {
         amount: 0,
-        currency: 'KES',
+        currency: settings.currency,
         method: 'mpesa',
       },
     },
@@ -81,6 +91,11 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
   const watchStartDate = watch('startDate');
   const watchEndDate = watch('endDate');
   const watchUnitId = watch('unitId');
+
+  // Update currency when settings change
+  useEffect(() => {
+    setValue('payment.currency', settings.currency);
+  }, [settings.currency, setValue]);
 
   // Calculate duration and update amount when dates or unit changes
   useEffect(() => {
@@ -204,7 +219,7 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
             {/* Customer Information */}
             <div className="sm:col-span-6 border-b border-gray-200 pb-6">
               <h4 className="text-lg font-medium text-gray-900 mb-4">Customer Information</h4>
-              
+
               <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
                 <div className="sm:col-span-3">
                   <label htmlFor="customerName" className="block text-sm font-medium text-gray-700">
@@ -217,9 +232,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                       <input
                         type="text"
                         id="customerName"
-                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
-                          errors.customerName ? 'border-red-300' : 'border-gray-300'
-                        }`}
+                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${errors.customerName ? 'border-red-300' : 'border-gray-300'
+                          }`}
                         {...field}
                       />
                     )}
@@ -240,9 +254,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                       <input
                         type="email"
                         id="customerEmail"
-                        className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
-                          errors.customerEmail ? 'border-red-300' : 'border-gray-300'
-                        }`}
+                        className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${errors.customerEmail ? 'border-red-300' : 'border-gray-300'
+                          }`}
                         {...field}
                       />
                     )}
@@ -263,9 +276,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                       <input
                         type="tel"
                         id="customerPhone"
-                        className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
-                          errors.customerPhone ? 'border-red-300' : 'border-gray-300'
-                        }`}
+                        className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${errors.customerPhone ? 'border-red-300' : 'border-gray-300'
+                          }`}
                         {...field}
                       />
                     )}
@@ -298,7 +310,7 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
             {/* Booking Details */}
             <div className="sm:col-span-6 border-b border-gray-200 pb-6">
               <h4 className="text-lg font-medium text-gray-900 mb-4">Booking Details</h4>
-              
+
               <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
                 <div className="sm:col-span-3">
                   <label htmlFor="unitId" className="block text-sm font-medium text-gray-700">
@@ -310,9 +322,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                     render={({ field }) => (
                       <select
                         id="unitId"
-                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
-                          errors.unitId ? 'border-red-300' : 'border-gray-300'
-                        }`}
+                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${errors.unitId ? 'border-red-300' : 'border-gray-300'
+                          }`}
                         {...field}
                       >
                         <option value="">Select a unit</option>
@@ -338,9 +349,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                     control={control}
                     render={({ field }) => (
                       <select
-                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
-                          errors.status ? 'border-red-300' : 'border-gray-300'
-                        }`}
+                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${errors.status ? 'border-red-300' : 'border-gray-300'
+                          }`}
                         {...field}
                       >
                         <option value="pending">Pending</option>
@@ -428,7 +438,7 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
             {/* Payment Information */}
             <div className="sm:col-span-6">
               <h4 className="text-lg font-medium text-gray-900 mb-4">Payment Information</h4>
-              
+
               <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700">
@@ -436,7 +446,7 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <span className="text-gray-500 sm:text-sm">KES</span>
+                      <span className="text-gray-500 sm:text-sm">{currencySymbol}</span>
                     </div>
                     <Controller
                       name="payment.amount"
@@ -444,9 +454,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                       render={({ field }) => (
                         <input
                           type="number"
-                          className={`block w-full pl-12 pr-12 sm:text-sm rounded-md ${
-                            errors.payment?.amount ? 'border-red-300' : 'border-gray-300'
-                          }`}
+                          className={`block w-full pl-12 pr-12 sm:text-sm rounded-md ${errors.payment?.amount ? 'border-red-300' : 'border-gray-300'
+                            }`}
                           {...field}
                           disabled={!selectedUnit}
                         />
@@ -467,9 +476,8 @@ const BookingForm: React.FC<BookingFormProps> = ({ bookingId, onSuccess }) => {
                     control={control}
                     render={({ field }) => (
                       <select
-                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${
-                          errors.payment?.method ? 'border-red-300' : 'border-gray-300'
-                        }`}
+                        className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm ${errors.payment?.method ? 'border-red-300' : 'border-gray-300'
+                          }`}
                         {...field}
                       >
                         <option value="mpesa">M-Pesa</option>

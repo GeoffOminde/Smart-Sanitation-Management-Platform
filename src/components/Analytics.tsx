@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { useLocale } from '../contexts/LocaleContext';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -13,7 +14,7 @@ import {
     ArcElement,
 } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
-import { TrendingUp, Users, Wrench, DollarSign } from 'lucide-react';
+import { TrendingUp, Users, Wrench, DollarSign, RefreshCw } from 'lucide-react';
 
 ChartJS.register(
     CategoryScale,
@@ -28,34 +29,69 @@ ChartJS.register(
 );
 
 const Analytics = () => {
+    const { t } = useLocale();
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const resp = await apiFetch('/api/analytics/dashboard');
-                if (resp.ok) {
-                    const json = await resp.json();
-                    setData(json);
-                }
-            } catch (err) {
-                console.error('Failed to fetch analytics', err);
-            } finally {
-                setLoading(false);
+    const fetchData = async (isManualRefresh = false) => {
+        if (isManualRefresh) setRefreshing(true);
+        try {
+            const resp = await apiFetch('/api/analytics/dashboard');
+            if (resp.ok) {
+                const json = await resp.json();
+                setData(json);
             }
-        };
+        } catch (err) {
+            console.error('Failed to fetch analytics', err);
+        } finally {
+            setLoading(false);
+            if (isManualRefresh) setRefreshing(false);
+        }
+    };
+
+    // Initial fetch
+    useEffect(() => {
         fetchData();
     }, []);
 
-    if (loading) return <div className="p-8 text-center text-gray-500">Loading analytics...</div>;
-    if (!data) return <div className="p-8 text-center text-red-500">Failed to load analytics data.</div>;
+    // Auto-refresh every 60 seconds
+    useEffect(() => {
+        const interval = setInterval(() => {
+            fetchData();
+        }, 60000); // 60 seconds
+
+        return () => clearInterval(interval);
+    }, []);
+
+    // Calculate dynamic growth rate
+    const calculateGrowthRate = () => {
+        if (!data || !data.revenue || !data.revenue.data || data.revenue.data.length < 2) {
+            return { rate: 0, isPositive: true };
+        }
+
+        const revenueData = data.revenue.data;
+        const currentMonth = revenueData[revenueData.length - 1];
+        const previousMonth = revenueData[revenueData.length - 2];
+
+        if (previousMonth === 0) {
+            return { rate: currentMonth > 0 ? 100 : 0, isPositive: currentMonth > 0 };
+        }
+
+        const growth = ((currentMonth - previousMonth) / previousMonth) * 100;
+        return { rate: Math.abs(growth), isPositive: growth >= 0 };
+    };
+
+    const growthData = data ? calculateGrowthRate() : { rate: 0, isPositive: true };
+
+    if (loading) return <div className="p-8 text-center text-gray-500">{t('analytics.loading')}</div>;
+    if (!data) return <div className="p-8 text-center text-red-500">{t('analytics.error')}</div>;
 
     const revenueChart = {
         labels: data.revenue.labels,
         datasets: [
             {
-                label: 'Revenue (KES)',
+                label: t('analytics.revenue.title') + ' (KES)',
                 data: data.revenue.data,
                 borderColor: 'rgb(75, 192, 192)',
                 backgroundColor: 'rgba(75, 192, 192, 0.5)',
@@ -65,10 +101,10 @@ const Analytics = () => {
     };
 
     const bookingChart = {
-        labels: ['Confirmed', 'Pending', 'Cancelled'],
+        labels: [t('analytics.label.confirmed'), t('analytics.label.pending'), t('analytics.label.cancelled')],
         datasets: [
             {
-                label: '# of Bookings',
+                label: t('analytics.bookings.chartTitle'),
                 data: [data.bookings.confirmed, data.bookings.pending, data.bookings.cancelled],
                 backgroundColor: [
                     'rgba(75, 192, 192, 0.6)',
@@ -81,10 +117,10 @@ const Analytics = () => {
     };
 
     const maintenanceChart = {
-        labels: ['Completed', 'Pending'],
+        labels: [t('analytics.label.completed'), t('analytics.label.pending')],
         datasets: [
             {
-                label: 'Maintenance Tasks',
+                label: t('analytics.tasks.desc'),
                 data: [data.maintenance.completed, data.maintenance.pending],
                 backgroundColor: [
                     'rgba(54, 162, 235, 0.6)',
@@ -96,23 +132,36 @@ const Analytics = () => {
     };
 
 
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Header / Stats Overview */}
+            {/* Actions */}
+            <div className="flex justify-end">
+                <button
+                    onClick={() => fetchData(true)}
+                    disabled={refreshing}
+                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 rounded-xl shadow-sm border border-gray-200 hover:bg-gray-50 hover:text-blue-600 hover:border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all text-sm font-medium"
+                >
+                    <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    {refreshing ? 'Refreshing...' : 'Refresh Data'}
+                </button>
+            </div>
+
+            {/* Stats Overview */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg shadow-green-500/20 relative overflow-hidden group hover:scale-[1.02] transition-transform">
                     <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-6 -mt-6"></div>
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-green-100 font-medium text-sm uppercase tracking-wide">Total Revenue</p>
+                                <p className="text-green-100 font-medium text-sm uppercase tracking-wide">{t('analytics.revenue.title')}</p>
                                 <h3 className="text-3xl font-extrabold mt-1">KES {data.revenue.data.reduce((a: any, b: any) => a + b, 0).toLocaleString()}</h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <DollarSign className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-xs text-green-100 font-medium">Net earnings this period</p>
+                        <p className="mt-4 text-xs text-green-100 font-medium">{t('analytics.revenue.desc')}</p>
                     </div>
                 </div>
 
@@ -121,14 +170,14 @@ const Analytics = () => {
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-blue-100 font-medium text-sm uppercase tracking-wide">Total Bookings</p>
+                                <p className="text-blue-100 font-medium text-sm uppercase tracking-wide">{t('analytics.bookings.title')}</p>
                                 <h3 className="text-3xl font-extrabold mt-1">{data.bookings.confirmed + data.bookings.pending + data.bookings.cancelled}</h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <Users className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-xs text-blue-100 font-medium">+15% vs last month</p>
+                        <p className="mt-4 text-xs text-blue-100 font-medium">{t('analytics.bookings.desc')}</p>
                     </div>
                 </div>
 
@@ -137,14 +186,14 @@ const Analytics = () => {
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-orange-100 font-medium text-sm uppercase tracking-wide">Pending Tasks</p>
+                                <p className="text-orange-100 font-medium text-sm uppercase tracking-wide">{t('analytics.tasks.title')}</p>
                                 <h3 className="text-3xl font-extrabold mt-1">{data.maintenance.pending}</h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <Wrench className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-xs text-orange-100 font-medium">Maintenance jobs requiring attention</p>
+                        <p className="mt-4 text-xs text-orange-100 font-medium">{t('analytics.tasks.desc')}</p>
                     </div>
                 </div>
 
@@ -153,14 +202,17 @@ const Analytics = () => {
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-purple-100 font-medium text-sm uppercase tracking-wide">Growth</p>
-                                <h3 className="text-3xl font-extrabold mt-1">+12%</h3>
+                                <p className="text-purple-100 font-medium text-sm uppercase tracking-wide">{t('analytics.growth.title')}</p>
+                                <h3 className="text-3xl font-extrabold mt-1">
+                                    {growthData.isPositive ? '+' : '-'}
+                                    {growthData.rate.toFixed(1)}%
+                                </h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <TrendingUp className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-xs text-purple-100 font-medium">Year-over-Year growth</p>
+                        <p className="mt-4 text-xs text-purple-100 font-medium">{t('analytics.growth.desc')}</p>
                     </div>
                 </div>
             </div>
@@ -170,8 +222,8 @@ const Analytics = () => {
                 {/* Revenue Trend */}
                 <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 min-h-[400px]">
                     <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold text-gray-900">Revenue Trend</h3>
-                        <button className="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">Last 6 Months</button>
+                        <h3 className="text-lg font-bold text-gray-900">{t('analytics.revenue.chartTitle')}</h3>
+                        <button className="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">{t('analytics.revenue.last6Months')}</button>
                     </div>
                     <div className="h-[320px]">
                         <Line
@@ -200,8 +252,8 @@ const Analytics = () => {
                 {/* Booking Status */}
                 <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 min-h-[400px]">
                     <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold text-gray-900">Booking Status</h3>
-                        <button className="text-xs font-semibold text-gray-600 bg-gray-50 px-3 py-1 rounded-lg">Real-time</button>
+                        <h3 className="text-lg font-bold text-gray-900">{t('analytics.bookings.chartTitle')}</h3>
+                        <button className="text-xs font-semibold text-gray-600 bg-gray-50 px-3 py-1 rounded-lg">{t('analytics.bookings.realTime')}</button>
                     </div>
                     <div className="h-[320px]">
                         <Bar
@@ -224,7 +276,7 @@ const Analytics = () => {
                 {/* Maintenance Overview */}
                 <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 lg:col-span-2">
                     <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold text-gray-900">Maintenance Distribution</h3>
+                        <h3 className="text-lg font-bold text-gray-900">{t('analytics.maintenance.chartTitle')}</h3>
                     </div>
                     <div className="h-80 w-full max-w-2xl mx-auto">
                         <Doughnut

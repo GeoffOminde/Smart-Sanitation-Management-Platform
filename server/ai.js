@@ -133,8 +133,49 @@ function priorityToUrgency(p) {
   }
 }
 
+
+// Smart Booking Suggestion (Heuristic)
+function smartBookingSuggest({ date, location, units, durationDays, capacityPerDay, bookingsHistory = [] }) {
+  // 1. Analyze historical density for this location (mock logic)
+  // In a real system, we'd query db for overlapping bookings in the same geolocation radius.
+
+  // Baseline availability check
+  const today = new Date();
+  const targetDate = date ? new Date(date) : new Date(today.setDate(today.getDate() + 1));
+
+  // Calculate simple heuristic utilization based on history count near target date
+  const nearbyBookings = bookingsHistory.filter(b => {
+    const bDate = new Date(b.date);
+    const diffTime = Math.abs(targetDate - bDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays < 3;
+  }).length;
+
+  // Utilization logic (fake but reasonable)
+  const baseUtilization = 0.2; // 20% base load
+  const utilization = Math.min(0.95, baseUtilization + (nearbyBookings * 0.1));
+
+  return {
+    suggestion: {
+      date: targetDate.toISOString().split('T')[0],
+      utilization: Number(utilization.toFixed(2))
+    },
+    alternatives: [
+      {
+        date: new Date(targetDate.getTime() + 86400000 * 2).toISOString().split('T')[0],
+        utilization: Number(Math.max(0.1, utilization - 0.1).toFixed(2))
+      },
+      {
+        date: new Date(targetDate.getTime() + 86400000 * 5).toISOString().split('T')[0],
+        utilization: Number(Math.max(0.1, utilization - 0.15).toFixed(2))
+      }
+    ]
+  };
+}
+
 module.exports = {
   predictMaintenance,
   routeOptimize,
+  smartBookingSuggest,
   haversineKm,
 };

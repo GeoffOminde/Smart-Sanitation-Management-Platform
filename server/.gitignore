@@ -4,3 +4,8 @@ node_modules
 *.env
 
 /generated/prisma
+
+# Logs
+logs/
+*.log
+npm-debug.log*

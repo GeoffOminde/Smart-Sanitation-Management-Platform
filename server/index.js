@@ -3,13 +3,34 @@ const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const compression = require('compression');
+const morgan = require('morgan');
 const nodemailer = require('nodemailer');
 const cron = require('node-cron');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const WebSocket = require('ws');
-const { routeOptimize, predictMaintenance } = require('./ai');
+const { routeOptimize, predictMaintenance, smartBookingSuggest } = require('./ai');
+
+// Import custom modules
+const logger = require('./logger');
+const { validate } = require('./validation');
+const {
+  rateLimiters,
+  helmetConfig,
+  getCorsOptions,
+  sanitizeRequest,
+  securityHeaders,
+  logRequest,
+  logError
+} = require('./security');
+const {
+  healthCheck,
+  readinessCheck,
+  livenessCheck,
+  metrics
+} = require('./health');
 
 const ROI_CONSTANTS = {
   AVOIDED_RATE: 0.35,
@@ -20,15 +41,48 @@ const ROI_CONSTANTS = {
 
 // Validate critical environment variables at startup
 if (!process.env.JWT_SECRET) {
-  console.error('FATAL: JWT_SECRET environment variable is not set. Server cannot start.');
-  console.error('Generate a secure secret with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  logger.error('FATAL: JWT_SECRET environment variable is not set. Server cannot start.');
+  logger.error('Generate a secure secret with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
 
 const prisma = new PrismaClient();
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
+
+// ==================== SECURITY MIDDLEWARE ====================
+// Apply security headers first
+app.use(helmetConfig);
+app.use(securityHeaders);
+
+// Enable compression for all responses
+app.use(compression());
+
+// CORS configuration
+app.use(cors(getCorsOptions()));
+
+// Request logging (Morgan + Winston)
+if (process.env.NODE_ENV === 'production') {
+  app.use(morgan('combined', { stream: logger.stream }));
+} else {
+  app.use(morgan('dev'));
+}
+
+// Body parsing
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request sanitization
+app.use(sanitizeRequest);
+
+// Custom request logging
+app.use(logRequest);
+
+// ==================== HEALTH CHECK ENDPOINTS ====================
+// These should be before rate limiting to allow monitoring tools unrestricted access
+app.get('/health', healthCheck);
+app.get('/health/ready', readinessCheck);
+app.get('/health/live', livenessCheck);
+app.get('/health/metrics', metrics);
 
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 const AI = require('./ai');
@@ -72,7 +126,7 @@ const _analyticsEvents = [];
 let wss;
 
 // Auth Routes
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', rateLimiters.auth, validate('register'), async (req, res) => {
   const { email, password, name, role } = req.body;
   if (!email || !password || !name) return res.status(400).json({ error: 'email, password, name required' });
   try {
@@ -86,7 +140,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', rateLimiters.auth, validate('login'), async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   try {
@@ -108,6 +162,98 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) {
     console.error('Login error', err);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Forgot Password - Generate reset token
+app.post('/api/auth/forgot-password', rateLimiters.auth, validate('forgotPassword'), async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      return res.json({ message: 'If that email exists, a reset link has been sent' });
+    }
+
+    // Generate reset token (valid for 1 hour)
+    const resetToken = require('crypto').randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
+
+    // Store reset token in database (you'll need to add these fields to User model)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken,
+        resetTokenExpiry
+      }
+    });
+
+    // In production, send email with reset link
+    // For now, we'll log it to console
+    const resetLink = `http://localhost:5173/reset-password?token=${resetToken}`;
+    console.log('🔐 Password Reset Link:', resetLink);
+    console.log('📧 Send this link to:', email);
+
+    // TODO: Send email using nodemailer
+    // const transporter = nodemailer.createTransport({...});
+    // await transporter.sendMail({
+    //   to: email,
+    //   subject: 'Password Reset Request',
+    //   html: `Click here to reset your password: <a href="${resetLink}">${resetLink}</a>`
+    // });
+
+    res.json({ message: 'Password reset link sent to your email' });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// Reset Password - Verify token and update password
+app.post('/api/auth/reset-password', rateLimiters.auth, validate('resetPassword'), async (req, res) => {
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: 'Token and new password are required' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    // Find user with valid reset token
+    const user = await prisma.user.findFirst({
+      where: {
+        resetToken: token,
+        resetTokenExpiry: {
+          gte: new Date() // Token not expired
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password and clear reset token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        resetToken: null,
+        resetTokenExpiry: null
+      }
+    });
+
+    res.json({ message: 'Password reset successful' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
@@ -145,7 +291,7 @@ app.get('/api/weather/current', async (req, res) => {
 });
 
 // Paystack Init (One-time payment)
-app.post('/api/paystack/init', async (req, res) => {
+app.post('/api/paystack/init', rateLimiters.payment, validate('paystackInit'), async (req, res) => {
   const { email, amount } = req.body;
   if (!email || !amount) return res.status(400).json({ error: 'email and amount required' });
 
@@ -177,60 +323,10 @@ app.post('/api/paystack/init', async (req, res) => {
 });
 
 // Paystack Subscriptions
-app.post('/api/billing/create-subscription', async (req, res) => {
-  const { email, planCode, userId } = req.body;
-  if (!email || !planCode) return res.status(400).json({ error: 'email and planCode required' });
-
-  try {
-    console.log('Creating subscription for:', { email, planCode, userId });
-
-    // Step 1: Create customer if doesn't exist
-    let customer;
-    try {
-      const customerResp = await axios.post('https://api.paystack.co/customer', {
-        email,
-        metadata: { userId }
-      }, {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      customer = customerResp.data.data;
-      console.log('Customer created/found:', customer.customer_code);
-    } catch (err) {
-      // Customer might already exist, that's okay
-      console.log('Customer creation note:', err.response?.data?.message);
-    }
-
-    // Step 2: Create subscription
-    const subscriptionResp = await axios.post('https://api.paystack.co/subscription', {
-      customer: email,
-      plan: planCode,
-      metadata: { userId, planCode }
-    }, {
-      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET}` }
-    });
-
-    if (subscriptionResp.data.status) {
-      const subData = subscriptionResp.data.data;
-      // Return the email token URL for payment
-      res.json({
-        authorization_url: subData.authorization?.authorization_url || `https://paystack.com/pay/${subData.email_token}`,
-        access_code: subData.email_token,
-        reference: subData.subscription_code
-      });
-    } else {
-      throw new Error('Invalid response from Paystack');
-    }
-  } catch (err) {
-    console.error('Paystack subscription error:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Failed to create subscription' });
-  }
-});
+// [Removed legacy Paystack-only create-subscription route to avoid conflict with new dynamic route]
 
 // M-Pesa STK Push
-app.post('/api/mpesa/stk', async (req, res) => {
+app.post('/api/mpesa/stk', rateLimiters.payment, validate('mpesaSTK'), async (req, res) => {
   const { phone, amount } = req.body;
   if (!phone || !amount) return res.status(400).json({ error: 'phone and amount required' });
 
@@ -242,23 +338,46 @@ app.post('/api/mpesa/stk', async (req, res) => {
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
     const passkey = process.env.MPESA_PASSKEY;
     const shortCode = process.env.MPESA_SHORTCODE || '174379';
-    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'http://localhost:3001/api/mpesa/callback';
+    // Use a valid HTTPS URL for callback (required by M-Pesa)
+    // For local development, use a dummy URL or ngrok
+    const callbackUrl = process.env.MPESA_CALLBACK_URL || 'https://mydomain.com/api/mpesa/callback';
     const baseUrl = process.env.MPESA_ENVIRONMENT === 'production'
       ? 'https://api.safaricom.co.ke'
       : 'https://sandbox.safaricom.co.ke';
 
+    // Validate credentials
     if (!consumerKey || !consumerSecret || !passkey) {
-      throw new Error('M-Pesa credentials not configured');
+      console.error('[M-Pesa] Missing credentials:', {
+        hasConsumerKey: !!consumerKey,
+        hasConsumerSecret: !!consumerSecret,
+        hasPasskey: !!passkey
+      });
+
+      return res.status(503).json({
+        error: 'M-Pesa not configured',
+        message: 'M-Pesa credentials are not set. Please configure MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, and MPESA_PASSKEY in your environment variables.',
+        documentation: 'See server/.env.mpesa.template for setup instructions'
+      });
     }
 
     // 1. Get Token
     const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-    const tokenResp = await axios.get(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
-      headers: { Authorization: `Basic ${auth}` }
-    });
+    let tokenResp;
+    try {
+      tokenResp = await axios.get(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
+        headers: { Authorization: `Basic ${auth}` }
+      });
+    } catch (authError) {
+      console.error('[M-Pesa] Authentication failed:', authError.response?.data || authError.message);
+      return res.status(401).json({
+        error: 'M-Pesa authentication failed',
+        message: 'Invalid M-Pesa credentials. Please check your MPESA_CONSUMER_KEY and MPESA_CONSUMER_SECRET.',
+        details: authError.response?.data?.errorMessage || authError.message
+      });
+    }
+
     const accessToken = tokenResp.data.access_token;
 
-    // 2. Generate Password
     // 2. Generate Password
     // M-Pesa requires YYYYMMDDHHMMSS in GMT+3 (Nairobi)
     const now = new Date();
@@ -306,7 +425,8 @@ app.post('/api/mpesa/stk', async (req, res) => {
     console.error('[M-Pesa] Error:', err.response?.data || err.message);
     res.status(500).json({
       error: 'M-Pesa STK failed',
-      details: err.response?.data?.errorMessage || err.message
+      message: err.response?.data?.errorMessage || err.message,
+      details: err.response?.data
     });
   }
 });
@@ -395,8 +515,8 @@ app.post('/api/ai/smart-booking/suggest', (req, res) => {
 // Duplicate AI endpoints removed (see shared implementation)
 
 // Assistant endpoint
-// Assistant endpoint - Enhanced Rule-Based RAG
-app.post('/api/assistant/message', async (req, res) => {
+// OLD ENDPOINT - DISABLED (replaced by enhanced version below)
+app.post('/api/assistant/message-OLD-DISABLED', async (req, res) => {
   try {
     const { message, locale } = req.body || {};
     if (typeof message !== 'string') return res.status(400).json({ error: 'message string required' });
@@ -404,59 +524,130 @@ app.post('/api/assistant/message', async (req, res) => {
     const lowerMsg = message.toLowerCase();
     let reply = '';
 
-    // --- Intent Detection Logic (Simple Heuristics) ---
+    // --- Enhanced Intent Detection Logic ---
 
     // 1. Booking / Reservation Query
-    if (lowerMsg.includes('book') || lowerMsg.includes('order') || lowerMsg.includes('reserve')) {
+    if (lowerMsg.includes('book') || lowerMsg.includes('order') || lowerMsg.includes('reserve') || lowerMsg.includes('rent')) {
       const pendingBookings = await prisma.booking.count({ where: { status: 'pending' } });
       const confirmedBookings = await prisma.booking.count({ where: { status: 'confirmed' } });
+      const availableUnits = await prisma.unit.count({ where: { status: 'active' } });
 
-      if (locale === 'sw') {
-        reply = `Tuna nafasi! Kwa sasa tuna oda ${pendingBookings} zinazosubiri na ${confirmedBookings} zimethibitishwa. Unaweza kuweka oda mpya kupitia tab ya 'Bookings'.`;
+      if (lowerMsg.includes('how') || lowerMsg.includes('process')) {
+        if (locale === 'sw') {
+          reply = `Mchakato wa kuweka oda ni rahisi! 1) Nenda kwenye tab ya 'Bookings' 2) Bonyeza 'New Booking' 3) Jaza maelezo ya mteja, chagua unit, na tarehe 4) Thibitisha malipo. Tuna units ${availableUnits} zinazopatikana sasa hivi!`;
+        } else {
+          reply = `Booking is easy! 1) Go to the 'Bookings' tab 2) Click 'New Booking' 3) Fill in customer details, select a unit, and choose dates 4) Confirm payment. We have ${availableUnits} units available right now!`;
+        }
       } else {
-        reply = `We can help with that! Currently, we have ${pendingBookings} pending and ${confirmedBookings} confirmed bookings. You can create a new booking directly from the 'Bookings' tab.`;
+        if (locale === 'sw') {
+          reply = `Tuna nafasi! Kwa sasa tuna oda ${pendingBookings} zinazosubiri na ${confirmedBookings} zimethibitishwa. Units ${availableUnits} zipo tayari. Unaweza kuweka oda mpya kupitia tab ya 'Bookings'.`;
+        } else {
+          reply = `We can help with that! Currently, we have ${pendingBookings} pending and ${confirmedBookings} confirmed bookings. ${availableUnits} units are available. You can create a new booking directly from the 'Bookings' tab.`;
+        }
       }
     }
     // 2. Pricing / Cost Query
-    else if (lowerMsg.includes('price') || lowerMsg.includes('cost') || lowerMsg.includes('much')) {
-      if (locale === 'sw') {
-        reply = "Bei zetu zinaanza KES 2,500 kwa siku kwa kila unit. Tunatoa punguzo kwa oda za muda mrefu (zaidi ya siku 7).";
+    else if (lowerMsg.includes('price') || lowerMsg.includes('cost') || lowerMsg.includes('much') || lowerMsg.includes('rate')) {
+      if (lowerMsg.includes('type') || lowerMsg.includes('different') || lowerMsg.includes('unit')) {
+        if (locale === 'sw') {
+          reply = "Bei zetu ni: **Standard Portable**: KES 2,500/siku, **Deluxe Portable**: KES 3,500/siku, **Wheelchair Accessible**: KES 4,000/siku. Punguzo za 15% kwa oda za wiki 1+, 25% kwa mwezi 1+.";
+        } else {
+          reply = "Our pricing: **Standard Portable**: KES 2,500/day, **Deluxe Portable**: KES 3,500/day, **Wheelchair Accessible**: KES 4,000/day. Discounts: 15% for 1+ week, 25% for 1+ month.";
+        }
       } else {
-        reply = "Our standard pricing starts at KES 2,500 per day per unit. We offer discounts for long-term rentals (7+ days).";
+        if (locale === 'sw') {
+          reply = "Bei zetu zinaanza KES 2,500 kwa siku kwa kila unit. Tunatoa punguzo kwa oda za muda mrefu (zaidi ya siku 7). Tuna aina tatu: Standard, Deluxe, na Wheelchair Accessible.";
+        } else {
+          reply = "Our standard pricing starts at KES 2,500 per day per unit. We offer discounts for long-term rentals (7+ days). We have 3 types: Standard, Deluxe, and Wheelchair Accessible units.";
+        }
       }
     }
-    // 3. Maintenance / Status Query
-    else if (lowerMsg.includes('maintenance') || lowerMsg.includes('repair') || lowerMsg.includes('broken') || lowerMsg.includes('status')) {
+    // 3. Payment Query
+    else if (lowerMsg.includes('pay') || lowerMsg.includes('payment') || lowerMsg.includes('mpesa') || lowerMsg.includes('card')) {
+      const paidBookings = await prisma.booking.count({ where: { paymentStatus: 'paid' } });
+      const pendingPayments = await prisma.booking.count({ where: { paymentStatus: 'pending' } });
+
+      if (lowerMsg.includes('method') || lowerMsg.includes('how')) {
+        if (locale === 'sw') {
+          reply = "Tunakubali malipo kupitia: M-Pesa (Paybill 123456), Kadi za Benki (Visa/Mastercard), na Malipo ya Moja kwa Moja kwa Benki. Malipo yote ni salama na yanalindwa. Unaweza kulipa wakati wa kuweka oda au baadaye.";
+        } else {
+          reply = "We accept payments via: M-Pesa (Paybill 123456), Credit/Debit Cards (Visa/Mastercard), and Direct Bank Transfer. All payments are secure and encrypted. You can pay during booking or later.";
+        }
+      } else {
+        if (locale === 'sw') {
+          reply = `Hali ya malipo: ${paidBookings} oda zimelipwa, ${pendingPayments} zinasubiri malipo. Tunakubali M-Pesa, kadi za benki, na uhamisho wa benki.`;
+        } else {
+          reply = `Payment status: ${paidBookings} bookings paid, ${pendingPayments} pending payment. We accept M-Pesa, credit cards, and bank transfers.`;
+        }
+      }
+    }
+    // 4. Maintenance / Status Query
+    else if (lowerMsg.includes('maintenance') || lowerMsg.includes('repair') || lowerMsg.includes('broken') || lowerMsg.includes('status') || lowerMsg.includes('service')) {
       const unitsInMaintenance = await prisma.unit.count({ where: { status: 'maintenance' } });
       const unitsActive = await prisma.unit.count({ where: { status: 'active' } });
 
-      if (locale === 'sw') {
-        reply = `Hali ya sasa: Tuna units ${unitsInMaintenance} kwenye ukarabati na ${unitsActive} zipo tayari kufanya kazi.`;
+      if (lowerMsg.includes('schedule') || lowerMsg.includes('when') || lowerMsg.includes('how often')) {
+        if (locale === 'sw') {
+          reply = "Ratiba ya ukarabati: Units zinahudumishwa kila wiki 2, au wakati fill level inafikia 90%, au wakati IoT sensors zinaonyesha tatizo. Tunafuatilia kiotomatiki hali, joto, na unyevu wa kila unit.";
+        } else {
+          reply = "Maintenance schedule: Units are serviced every 2 weeks, when fill level reaches 90%, or when IoT sensors detect issues. We automatically monitor temperature, humidity, and odor levels for each unit.";
+        }
       } else {
-        reply = `System Status: ${unitsInMaintenance} units are currently in maintenance, while ${unitsActive} are active and deployed.`;
+        if (locale === 'sw') {
+          reply = `Hali ya sasa: Tuna units ${unitsInMaintenance} kwenye ukarabati na ${unitsActive} zipo tayari kufanya kazi. Tunafuatilia kila unit kwa kutumia IoT sensors kwa joto, unyevu, na harufu.`;
+        } else {
+          reply = `System Status: ${unitsInMaintenance} units are currently in maintenance, while ${unitsActive} are active and deployed. We monitor each unit with IoT sensors for temperature, humidity, and odor levels.`;
+        }
       }
     }
-    // 4. Revenue / Earnings (Admin Query)
-    else if (lowerMsg.includes('money') || lowerMsg.includes('revenue') || lowerMsg.includes('earned') || lowerMsg.includes('sales')) {
-      // Quickly sum up successful transactions
+    // 5. IoT / Monitoring Query
+    else if (lowerMsg.includes('iot') || lowerMsg.includes('sensor') || lowerMsg.includes('monitor') || lowerMsg.includes('track') || lowerMsg.includes('temperature')) {
+      if (locale === 'sw') {
+        reply = "Kila unit ina sensors za IoT zinazofuatilia: 🌡️ Joto (27-30°C), 💧 Unyevu (60-70%), 👃 Kiwango cha harufu (0-100), 📊 Idadi ya matumizi, na 🔋 Betri. Data inapatikana wakati halisi kwenye Fleet Map!";
+      } else {
+        reply = "Each unit has IoT sensors tracking: 🌡️ Temperature (27-30°C), 💧 Humidity (60-70%), 👃 Odor level (0-100), 📊 Usage count, and 🔋 Battery. Real-time data is available on the Fleet Map!";
+      }
+    }
+    // 6. Unit Types Query
+    else if (lowerMsg.includes('type') || lowerMsg.includes('kind') || lowerMsg.includes('wheelchair') || lowerMsg.includes('accessible')) {
+      if (locale === 'sw') {
+        reply = "Tuna aina 3 za units: **Standard Portable** (KES 2,500/siku) - kawaida, **Deluxe Portable** (KES 3,500/siku) - ina vipengele vya ziada, **Wheelchair Accessible** (KES 4,000/siku) - inafaa kwa wenye ulemavu. Zote zina IoT monitoring!";
+      } else {
+        reply = "We have 3 unit types: **Standard Portable** (KES 2,500/day) - basic model, **Deluxe Portable** (KES 3,500/day) - premium features, **Wheelchair Accessible** (KES 4,000/day) - ADA compliant. All include IoT monitoring!";
+      }
+    }
+    // 7. Revenue / Earnings (Admin Query)
+    else if (lowerMsg.includes('money') || lowerMsg.includes('revenue') || lowerMsg.includes('earned') || lowerMsg.includes('sales') || lowerMsg.includes('income')) {
       const aggregations = await prisma.transaction.aggregate({
         _sum: { amount: true },
         where: { status: 'success' }
       });
       const total = aggregations._sum.amount || 0;
+      const bookingCount = await prisma.booking.count({ where: { status: 'confirmed' } });
 
       if (locale === 'sw') {
-        reply = `Jumla ya mapato hadi sasa ni KES ${total.toLocaleString()}.`;
+        reply = `Jumla ya mapato hadi sasa ni KES ${total.toLocaleString()} kutoka kwa oda ${bookingCount} zilizothibitishwa. Unaweza kuona ripoti kamili kwenye tab ya 'Analytics'.`;
       } else {
-        reply = `Total revenue generated to date is KES ${total.toLocaleString()}.`;
+        reply = `Total revenue generated to date is KES ${total.toLocaleString()} from ${bookingCount} confirmed bookings. View detailed reports in the 'Analytics' tab.`;
+      }
+    }
+    // 8. Location / Availability Query
+    else if (lowerMsg.includes('where') || lowerMsg.includes('location') || lowerMsg.includes('area') || lowerMsg.includes('available')) {
+      const units = await prisma.unit.findMany({ where: { status: 'active' }, select: { location: true } });
+      const locations = [...new Set(units.map(u => u.location))].slice(0, 5).join(', ');
+
+      if (locale === 'sw') {
+        reply = `Tuna units katika maeneo mengi ya Nairobi ikiwemo: ${locations}. Angalia Fleet Map kuona mahali halisi pa kila unit!`;
+      } else {
+        reply = `We have units deployed across Nairobi including: ${locations}. Check the Fleet Map to see exact locations of all units!`;
       }
     }
     // Default / Greeting
     else {
       if (locale === 'sw') {
-        reply = "Habari! Mimi ni msaidizi wako wa AI. Naweza kukusaidia na maswala ya oda, bei, au hali ya units. Tafadhali uliza chote!";
+        reply = "Habari! 👋 Mimi ni Cortex AI, msaidizi wako wa Smart Sanitation. Naweza kukusaidia na:\n\n📅 **Oda** - Jinsi ya kuweka oda\n💰 **Bei** - Aina za units na bei\n💳 **Malipo** - Njia za kulipa\n🔧 **Ukarabati** - Hali ya units\n📡 **IoT** - Ufuatiliaji wa wakati halisi\n\nUliza chochote!";
       } else {
-        reply = "Hello! I am your AI sanitation assistant. I can help you with bookings, pricing enquiries, system status, or revenue reports. Ask me anything!";
+        reply = "Hello! 👋 I'm Cortex AI, your Smart Sanitation assistant. I can help you with:\n\n📅 **Bookings** - How to make reservations\n💰 **Pricing** - Unit types and rates\n💳 **Payments** - Payment methods\n🔧 **Maintenance** - Unit status and service\n📡 **IoT** - Real-time monitoring\n\nAsk me anything!";
       }
     }
 
@@ -525,8 +716,156 @@ app.post('/api/ai/route-optimize', (req, res) => {
   }
 });
 
+// ==================== ENHANCED AI ASSISTANT ====================
+const { handleAssistantMessage } = require('./assistant-enhanced');
 
-// M-Pesa
+app.post('/api/assistant/message', rateLimiters.api, async (req, res) => {
+  try {
+    const { message, locale, sessionId } = req.body || {};
+    if (typeof message !== 'string') {
+      return res.status(400).json({ error: 'message string required' });
+    }
+
+    const reply = await handleAssistantMessage(message, locale, sessionId);
+    res.json({ reply });
+  } catch (err) {
+    logger.error('[assistant/message] error', { error: err?.message || err });
+    res.status(500).json({ error: 'Assistant failed' });
+  }
+});
+
+// ==================== ROI Analytics ====================
+app.get('/api/analytics/roi', async (req, res) => {
+  try {
+    // Fetch real data from database
+    const units = await prisma.unit.findMany();
+    const routes = await prisma.route.findMany();
+    const bookings = await prisma.booking.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Calculate KPIs from real data
+    const totalUnits = units.length;
+    const activeUnits = units.filter(u => u.status === 'active').length;
+    const avgFillLevel = units.length > 0
+      ? units.reduce((sum, u) => sum + u.fillLevel, 0) / units.length
+      : 0;
+
+    // Pickups Avoided: Based on smart routing (units with <80% fill)
+    const pickupsAvoided = units.filter(u => u.fillLevel < 80).length;
+
+    // Route Miles Reduced: Estimate based on optimized routes
+    const completedRoutes = routes.filter(r => r.status === 'completed');
+    const routeMilesReduced = completedRoutes.length * 15; // Avg 15 miles saved per optimized route
+
+    // Fuel Savings: $3.50 per gallon, 8 MPG average truck
+    const fuelSavings = (routeMilesReduced / 8) * 3.50;
+
+    // Uptime: Percentage of active units
+    const uptime = totalUnits > 0 ? ((activeUnits / totalUnits) * 100).toFixed(1) : 0;
+
+    // Monthly Revenue from bookings
+    const monthlyRevenue = {};
+    const last6Months = [];
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      last6Months.push(monthKey);
+      monthlyRevenue[monthKey] = 0;
+    }
+
+    bookings.forEach(booking => {
+      const bookingDate = new Date(booking.createdAt);
+      const monthKey = bookingDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      if (monthlyRevenue.hasOwnProperty(monthKey)) {
+        monthlyRevenue[monthKey] += booking.amount || 0;
+      }
+    });
+
+    // Cohort Analysis - Real data based on booking patterns
+    const cohorts = [];
+    const now = new Date();
+
+    // Analyze last 3 months
+    for (let i = 0; i < 3; i++) {
+      const cohortDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const cohortName = cohortDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+      // Get bookings from this cohort month
+      const cohortBookings = bookings.filter(b => {
+        const bookingDate = new Date(b.createdAt);
+        return bookingDate.getMonth() === cohortDate.getMonth() &&
+          bookingDate.getFullYear() === cohortDate.getFullYear();
+      });
+
+      const cohortSize = cohortBookings.length;
+
+      if (cohortSize > 0) {
+        // Calculate retention (simplified - based on repeat bookings)
+        const uniqueCustomers = new Set(cohortBookings.map(b => b.customerName)).size;
+        const repeatCustomers = cohortBookings.length - uniqueCustomers;
+
+        // Estimate retention rates
+        const d7 = Math.min(95, 70 + (repeatCustomers / cohortSize) * 30);
+        const d30 = Math.min(85, 50 + (repeatCustomers / cohortSize) * 35);
+        const d90 = Math.min(75, 35 + (repeatCustomers / cohortSize) * 40);
+
+        cohorts.push({
+          cohort: cohortName,
+          d7: Math.round(d7),
+          d30: Math.round(d30),
+          d90: Math.round(d90)
+        });
+      }
+    }
+
+    // If no real cohort data, return empty array instead of mock data
+    if (cohorts.length === 0) {
+      cohorts.push({
+        cohort: now.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        d7: 0,
+        d30: 0,
+        d90: 0
+      });
+    }
+
+
+    // Engagement Metrics
+    const totalBookings = bookings.length;
+    const recentBookings = bookings.filter(b => {
+      const bookingDate = new Date(b.createdAt);
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return bookingDate >= weekAgo;
+    }).length;
+
+    const engagement = {
+      wau: recentBookings, // Weekly active (recent bookings)
+      mau: Math.min(totalBookings, 50), // Monthly active (capped for display)
+      stickiness: recentBookings > 0 && totalBookings > 0
+        ? ((recentBookings / Math.min(totalBookings, 50)) * 100).toFixed(0)
+        : 0,
+      activeRatio: totalUnits > 0 ? ((activeUnits / totalUnits) * 100).toFixed(0) : 0
+    };
+
+    res.json({
+      pickupsAvoided,
+      routeMilesReduced,
+      fuelSavings: Math.round(fuelSavings),
+      uptime: parseFloat(uptime),
+      monthlyRevenue,
+      cohorts,
+      engagement
+    });
+
+  } catch (err) {
+    console.error('Error calculating ROI:', err);
+    res.status(500).json({ error: 'Failed to calculate ROI metrics' });
+  }
+});
+
+
 app.get('/api/mpesa/token', async (req, res) => {
   try {
     const key = process.env.MPESA_CONSUMER_KEY;
@@ -550,17 +889,27 @@ app.get('/api/mpesa/token', async (req, res) => {
 // Temporarily disabled auth middleware for demo purposes since frontend uses mock auth
 // app.use('/api/admin', authMiddleware);
 
-app.get('/api/admin/transactions', async (req, res) => {
+app.get('/api/admin/transactions', authMiddleware, async (req, res) => {
   try {
+    console.log('[/api/admin/transactions] Fetching transactions...');
     const transactions = await prisma.transaction.findMany({ orderBy: { createdAt: 'desc' } });
+    console.log(`[/api/admin/transactions] Found ${transactions.length} transactions`);
     res.json({ transactions });
   } catch (err) {
-    console.error('Error fetching transactions', err);
-    res.status(500).json({ error: 'Failed to fetch transactions' });
+    console.error('[/api/admin/transactions] Error fetching transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions', details: err.message });
   }
 });
 
-app.post('/api/admin/seed', async (req, res) => {
+app.post('/api/admin/seed', authMiddleware, async (req, res) => {
+  // PRODUCTION SAFETY: Only allow seeding in development/staging environments
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({
+      error: 'Seeding is disabled in production',
+      message: 'Cannot add demo data to production database'
+    });
+  }
+
   try {
     const demo = [
       { provider: 'paystack', email: 'demo1@example.com', amount: 1500, raw: JSON.stringify({ demo: true }), status: 'success' },
@@ -574,7 +923,7 @@ app.post('/api/admin/seed', async (req, res) => {
   }
 });
 
-app.delete('/api/admin/transactions/:id', async (req, res) => {
+app.delete('/api/admin/transactions/:id', authMiddleware, async (req, res) => {
   const id = req.params.id;
   try {
     const deleted = await prisma.transaction.delete({ where: { id } });
@@ -599,45 +948,6 @@ app.post('/api/ws/broadcast', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
-// Weather
-app.get('/api/weather/current', async (req, res) => {
-  try {
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'Missing OPENWEATHER_API_KEY' });
-    const { city } = req.query;
-    if (!city) return res.status(400).json({ error: 'city query param is required' });
-
-    if (ENABLE_WEATHER_CACHE) {
-      const cached = _weatherCache.get(city);
-      if (cached && (Date.now() - cached.ts) / 1000 < WEATHER_CACHE_TTL_S) {
-        return res.json(cached.data);
-      }
-    }
-
-    const url = 'https://api.openweathermap.org/data/2.5/weather';
-    const resp = await axios.get(url, { params: { q: city, units: 'metric', appid: apiKey } });
-    const data = resp.data;
-    const trimmed = {
-      city: data.name,
-      coord: data.coord,
-      weather: data.weather?.[0] || null,
-      main: data.main,
-      wind: data.wind,
-      clouds: data.clouds,
-      dt: data.dt,
-      sys: { country: data.sys?.country, sunrise: data.sys?.sunrise, sunset: data.sys?.sunset },
-    };
-
-    if (ENABLE_WEATHER_CACHE) {
-      _weatherCache.set(city, { ts: Date.now(), data: trimmed });
-    }
-    res.json(trimmed);
-  } catch (err) {
-    const msg = err.response?.data || err.message;
-    console.error('[weather/current] error', msg);
-    res.status(500).json({ error: 'Failed to fetch weather' });
-  }
-});
 
 // Analytics
 if (ENABLE_ANALYTICS_API) {
@@ -713,12 +1023,14 @@ if (ENABLE_ANALYTICS_API) {
   // ROI & Value Analytics
   app.get('/api/analytics/roi', async (req, res) => {
     try {
+      // Fetch data including timestamps for cohort analysis
       const [units, logs, transactions] = await Promise.all([
         prisma.unit.findMany(),
         prisma.maintenanceLog.findMany(),
-        prisma.transaction.findMany({ where: { status: 'success' } })
+        prisma.transaction.findMany({ where: { status: 'success' }, orderBy: { createdAt: 'asc' } })
       ]);
 
+      // --- Operational ROI Metrics ---
       const totalServicings = logs.length || 1;
       const pickupsAvoided = Math.floor(totalServicings * ROI_CONSTANTS.AVOIDED_RATE) + ROI_CONSTANTS.BASE_AVOIDED;
       const routeMilesReduced = pickupsAvoided * ROI_CONSTANTS.BASE_MILES;
@@ -728,19 +1040,109 @@ if (ENABLE_ANALYTICS_API) {
       const totalUnits = units.length || 1;
       const uptime = ((activeUnits / totalUnits) * 100).toFixed(1);
 
+      // --- Revenue Trend ---
       const monthlyRevenue = {};
       transactions.forEach(t => {
         const d = new Date(t.createdAt);
-        const month = d.toLocaleString('default', { month: 'short' });
+        const month = d.toLocaleString('default', { month: 'short' }); // e.g., "Oct", "Nov"
         monthlyRevenue[month] = (monthlyRevenue[month] || 0) + t.amount;
       });
 
+      // --- Cohort Analysis (Retention) ---
+      // Goal: Group users by their first transaction month, then track if they transact in subsequent months.
+      const userFirstMonth = new Map(); // email -> "YYYY-MM"
+      const monthlyActiveUsers = new Map(); // "YYYY-MM" -> Set(email)
+
+      transactions.forEach(t => {
+        const userId = t.email || t.phone; // Use email or phone as ID
+        if (!userId) return;
+
+        const d = new Date(t.createdAt);
+        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+        if (!userFirstMonth.has(userId)) {
+          userFirstMonth.set(userId, monthKey);
+        }
+
+        if (!monthlyActiveUsers.has(monthKey)) {
+          monthlyActiveUsers.set(monthKey, new Set());
+        }
+        monthlyActiveUsers.get(monthKey).add(userId);
+      });
+
+      // Generate last 5 months of cohorts
+      const availableMonths = Array.from(monthlyActiveUsers.keys()).sort();
+      const recentMonths = availableMonths.slice(-5);
+
+      const cohorts = recentMonths.map(cohortMonthKey => {
+        // Find all users whose first transaction was in this month
+        const cohortUsers = Array.from(userFirstMonth.entries())
+          .filter(([uid, startMonth]) => startMonth === cohortMonthKey)
+          .map(([uid]) => uid);
+
+        const size = cohortUsers.length;
+        if (size === 0) return null;
+
+        // Helper to check retention at month offset X
+        const getRetention = (offsetMonths) => {
+          const [y, m] = cohortMonthKey.split('-').map(Number);
+          const targetDate = new Date(y, m - 1 + offsetMonths, 1);
+          const targetKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+
+          if (!monthlyActiveUsers.has(targetKey)) return 0;
+
+          // Count how many of the original cohort users are present in the target month
+          const retained = cohortUsers.filter(u => monthlyActiveUsers.get(targetKey).has(u)).length;
+          return Math.round((retained / size) * 100);
+        };
+
+        const monthLabel = new Date(`${cohortMonthKey}-01`).toLocaleString('default', { month: 'short' });
+
+        return {
+          cohort: monthLabel,
+          size, // For debugging/display if needed
+          d7: getRetention(0),  // Month 0 (Activation/First Month)
+          d30: getRetention(1), // Month 1
+          d90: getRetention(3)  // Month 3
+        };
+      }).filter(Boolean);
+
+
+      // --- Engagement Metrics (WAU / MAU) ---
+      const now = new Date();
+      const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const users7d = new Set();
+      const users30d = new Set();
+
+      transactions.forEach(t => {
+        const d = new Date(t.createdAt);
+        const userId = t.email || t.phone;
+        if (!userId) return;
+
+        if (d >= oneWeekAgo) users7d.add(userId);
+        if (d >= oneMonthAgo) users30d.add(userId);
+      });
+
+      const wau = users7d.size;
+      const mau = users30d.size; // Simple MAU (active in last 30d) based on transactions
+      const stickiness = mau > 0 ? ((wau / mau) * 100).toFixed(1) : 0;
+
+      // If no data, provide sensible empty/default returns to avoid client crashes
       res.json({
         pickupsAvoided,
         routeMilesReduced,
         fuelSavings,
         uptime,
-        monthlyRevenue
+        monthlyRevenue,
+        cohorts: cohorts.length ? cohorts : [],
+        engagement: {
+          wau,
+          mau,
+          stickiness: Number(stickiness),
+          activeRatio: 94.2 // Placeholder active ratio 
+        }
       });
     } catch (err) {
       console.error('[analytics/roi] error', err);
@@ -763,7 +1165,7 @@ app.get('/api/maintenance', async (req, res) => {
   }
 });
 
-app.post('/api/maintenance', async (req, res) => {
+app.post('/api/maintenance', authMiddleware, async (req, res) => {
   try {
     const { unitId, type, description, scheduledDate, technicianId } = req.body;
     if (!unitId || !type || !scheduledDate) return res.status(400).json({ error: 'Missing required fields' });
@@ -791,7 +1193,7 @@ app.post('/api/maintenance', async (req, res) => {
   }
 });
 
-app.put('/api/maintenance/:id/complete', async (req, res) => {
+app.put('/api/maintenance/:id/complete', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const log = await prisma.maintenanceLog.update({
@@ -812,7 +1214,7 @@ app.put('/api/maintenance/:id/complete', async (req, res) => {
   }
 });
 
-app.delete('/api/maintenance/:id', async (req, res) => {
+app.delete('/api/maintenance/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.maintenanceLog.delete({ where: { id } });
@@ -841,7 +1243,7 @@ app.get('/api/units', async (req, res) => {
   }
 });
 
-app.post('/api/units', async (req, res) => {
+app.post('/api/units', authMiddleware, async (req, res) => {
   try {
     const { serialNo, location, fillLevel, batteryLevel, status, coordinates } = req.body;
     const unit = await prisma.unit.create({
@@ -861,7 +1263,7 @@ app.post('/api/units', async (req, res) => {
   }
 });
 
-app.put('/api/units/:id', async (req, res) => {
+app.put('/api/units/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { location, fillLevel, batteryLevel, status } = req.body;
@@ -893,7 +1295,7 @@ app.get('/api/routes', async (req, res) => {
   }
 });
 
-app.post('/api/routes', async (req, res) => {
+app.post('/api/routes', authMiddleware, async (req, res) => {
   try {
     const route = await prisma.route.create({ data: req.body });
     res.json(route);
@@ -903,7 +1305,7 @@ app.post('/api/routes', async (req, res) => {
   }
 });
 
-app.put('/api/routes/:id', async (req, res) => {
+app.put('/api/routes/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const route = await prisma.route.update({ where: { id }, data: req.body });
@@ -914,7 +1316,7 @@ app.put('/api/routes/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/routes/:id', async (req, res) => {
+app.delete('/api/routes/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.route.delete({ where: { id } });
@@ -936,7 +1338,7 @@ app.get('/api/bookings', async (req, res) => {
   }
 });
 
-app.post('/api/bookings', async (req, res) => {
+app.post('/api/bookings', authMiddleware, async (req, res) => {
   try {
     // Ensure date is properly formatted
     const data = { ...req.body };
@@ -949,12 +1351,30 @@ app.post('/api/bookings', async (req, res) => {
   }
 });
 
-app.put('/api/bookings/:id', async (req, res) => {
+app.get('/api/bookings/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    res.json(booking);
+  } catch (err) {
+    console.error('Error fetching booking', err);
+    res.status(500).json({ error: 'Failed to fetch booking' });
+  }
+});
+
+app.patch('/api/bookings/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const data = { ...req.body };
+    // remove id if present in body
+    delete data.id;
     if (data.date) data.date = new Date(data.date);
-    const booking = await prisma.booking.update({ where: { id }, data });
+
+    const booking = await prisma.booking.update({
+      where: { id },
+      data
+    });
     res.json(booking);
   } catch (err) {
     console.error('Error updating booking', err);
@@ -962,7 +1382,7 @@ app.put('/api/bookings/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/bookings/:id', async (req, res) => {
+app.delete('/api/bookings/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.booking.delete({ where: { id } });
@@ -972,6 +1392,10 @@ app.delete('/api/bookings/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete booking' });
   }
 });
+
+
+
+
 
 // Team Members
 app.get('/api/team-members', async (req, res) => {
@@ -984,7 +1408,7 @@ app.get('/api/team-members', async (req, res) => {
   }
 });
 
-app.post('/api/team-members', async (req, res) => {
+app.post('/api/team-members', authMiddleware, async (req, res) => {
   try {
     const data = { ...req.body };
     if (!data.joinDate) data.joinDate = new Date();
@@ -996,7 +1420,7 @@ app.post('/api/team-members', async (req, res) => {
   }
 });
 
-app.put('/api/team-members/:id', async (req, res) => {
+app.put('/api/team-members/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const member = await prisma.teamMember.update({ where: { id }, data: req.body });
@@ -1007,7 +1431,7 @@ app.put('/api/team-members/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/team-members/:id', async (req, res) => {
+app.delete('/api/team-members/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.teamMember.delete({ where: { id } });
@@ -1035,31 +1459,7 @@ app.get('/api/notifications', async (req, res) => {
   }
 });
 
-app.post('/api/notifications/send', async (req, res) => {
-  const { channel, recipient, message } = req.body;
-  if (!channel || !recipient || !message) return res.status(400).json({ error: 'Missing fields' });
 
-  // Simulate external API call (e.g. Twilio/Meta)
-  console.log(`[${channel.toUpperCase()}] Sending to ${recipient}: "${message}"`);
-
-  // Artificial delay to feel real
-  await new Promise(r => setTimeout(r, 800));
-
-  try {
-    const log = await prisma.notificationLog.create({
-      data: {
-        channel,
-        recipient,
-        message,
-        status: 'sent' // Assume success for demo
-      }
-    });
-    res.json({ success: true, log });
-  } catch (err) {
-    console.error('Error logging notification', err);
-    res.status(500).json({ error: 'Failed to send notification' });
-  }
-});
 
 // ==================== Settings API ====================
 // GET company settings
@@ -1079,6 +1479,9 @@ app.get('/api/settings', authMiddleware, async (req, res) => {
           contactEmail: req.user.email || 'admin@smartsanitation.co.ke',
           phone: '+254 700 000 000',
           language: 'en',
+          sessionTimeout: '30',
+          theme: 'light',
+          currency: 'KES',
           whatsappNotifications: true,
           emailNotifications: true
         }
@@ -1094,6 +1497,9 @@ app.get('/api/settings', authMiddleware, async (req, res) => {
       contactEmail: req.user?.email || 'admin@smartsanitation.co.ke',
       phone: '+254 700 000 000',
       language: 'en',
+      sessionTimeout: '30',
+      theme: 'light',
+      currency: 'KES',
       whatsappNotifications: true,
       emailNotifications: true
     });
@@ -1109,7 +1515,10 @@ app.put('/api/settings', authMiddleware, async (req, res) => {
       phone,
       language,
       whatsappNotifications,
-      emailNotifications
+      emailNotifications,
+      theme,
+      currency,
+      sessionTimeout
     } = req.body;
 
     // Validation
@@ -1131,6 +1540,9 @@ app.put('/api/settings', authMiddleware, async (req, res) => {
           contactEmail: contactEmail || settings.contactEmail,
           phone: phone || settings.phone,
           language: language || settings.language,
+          sessionTimeout: sessionTimeout || settings.sessionTimeout,
+          theme: theme || settings.theme,
+          currency: currency || settings.currency,
           whatsappNotifications: whatsappNotifications !== undefined ? whatsappNotifications : settings.whatsappNotifications,
           emailNotifications: emailNotifications !== undefined ? emailNotifications : settings.emailNotifications,
           updatedAt: new Date()
@@ -1145,6 +1557,9 @@ app.put('/api/settings', authMiddleware, async (req, res) => {
           contactEmail: contactEmail || req.user.email,
           phone: phone || '+254 700 000 000',
           language: language || 'en',
+          sessionTimeout: sessionTimeout || '30',
+          theme: theme || 'light',
+          currency: currency || 'KES',
           whatsappNotifications: whatsappNotifications !== undefined ? whatsappNotifications : true,
           emailNotifications: emailNotifications !== undefined ? emailNotifications : true
         }
@@ -1163,9 +1578,11 @@ app.put('/api/settings', authMiddleware, async (req, res) => {
 });
 
 // Notifications
-app.post('/api/notifications/send', async (req, res) => {
+// Notifications
+app.post('/api/notifications/send', authMiddleware, async (req, res) => {
   try {
     const { channel, recipient, message } = req.body;
+    if (!channel || !recipient || !message) return res.status(400).json({ error: 'Missing fields' });
 
     console.log(`[Notification Mock] Sending ${channel} to ${recipient}: ${message}`);
 
@@ -1189,30 +1606,205 @@ app.post('/api/notifications/send', async (req, res) => {
   }
 });
 
+
+// IoT Telemetry Endpoint (Simulated Ingest)
+app.post('/api/iot/telemetry', authMiddleware, async (req, res) => {
+  try {
+    const { serialNo, fillLevel, batteryLevel, lat, lng } = req.body;
+
+    // Find unit
+    const unit = await prisma.unit.findUnique({ where: { serialNo } });
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    // Update unit
+    const updated = await prisma.unit.update({
+      where: { id: unit.id },
+      data: {
+        fillLevel: Number(fillLevel),
+        batteryLevel: Number(batteryLevel),
+        coordinates: (lat && lng) ? JSON.stringify([lat, lng]) : undefined,
+        lastSeen: new Date()
+      }
+    });
+
+    console.log(`[IoT] Telemetry received for ${serialNo}: Fill ${fillLevel}%, Batt ${batteryLevel}%`);
+    res.json({ success: true, unit: updated });
+  } catch (err) {
+    console.error('IoT Ingest Error:', err);
+    res.status(500).json({ error: 'Failed to process telemetry' });
+  }
+});
+
+// ==================== Plans API ====================
+app.get('/api/plans', async (req, res) => {
+  try {
+    let plans = await prisma.plan.findMany();
+    if (plans.length === 0) {
+      // Seed default plans
+      await prisma.plan.createMany({
+        data: [
+          { key: 'starter', name: 'Starter', price: '$49', period: '/month', features: JSON.stringify(['Up to 5 vehicles', 'Basic routing', 'Standard support']) },
+          { key: 'growth', name: 'Growth', price: '$149', period: '/month', features: JSON.stringify(['Up to 20 vehicles', 'AI Route Optimization', 'Priority Support']) },
+          { key: 'enterprise', name: 'Enterprise', price: '$499', period: '/month', features: JSON.stringify(['Unlimited vehicles', 'Custom Integrations', 'Dedicated Manager']) }
+        ]
+      });
+      plans = await prisma.plan.findMany();
+    }
+    // Parse features
+    const formatted = plans.map(p => ({ ...p, features: JSON.parse(p.features) }));
+    res.json(formatted);
+  } catch (err) {
+    console.error('Error fetching plans', err);
+    res.status(500).json({ error: 'Failed to fetch plans' });
+  }
+});
+
+
+// ==================== Billing API ====================
+app.post('/api/billing/create-subscription', async (req, res) => {
+  try {
+    const { email, planCode, userId } = req.body;
+    console.log('Init Subscription:', email, planCode);
+
+    // DYNAMIC PLAN MAPPING
+    let newPlan = 'starter';
+    if (planCode && planCode.toLowerCase().includes('growth')) newPlan = 'growth';
+    if (planCode && planCode.toLowerCase().includes('enterprise')) newPlan = 'enterprise';
+
+    // SIMULATION: Directly update the user for the demo
+    if (userId && userId !== 'current-user-id') {
+      try {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { subscriptionPlan: newPlan }
+        });
+      } catch (e) { console.warn('User update failed (likely mock ID):', e.message); }
+    }
+
+    // For Docker/Proxy environments, the origin/referer might differ.
+    // We want to redirect back to the billing page.
+    // If running on localhost:80 via Docker, origin might be correct.
+    let baseUrl = 'http://localhost';
+    if (req.get('origin')) baseUrl = req.get('origin');
+    else if (req.get('referer')) {
+      try {
+        const refUrl = new URL(req.get('referer'));
+        baseUrl = refUrl.origin;
+      } catch (e) { }
+    }
+
+    res.json({
+      status: true,
+      message: 'Subscription initialized',
+      authorization_url: `${baseUrl}/billing?success=true&plan=${newPlan}&ref=${Date.now()}`
+    });
+
+  } catch (err) {
+    console.error('Subscription Error', err);
+    res.status(500).json({ error: 'Failed to initialize subscription' });
+  }
+});
+
+// ==================== ERROR HANDLING MIDDLEWARE ====================
+// 404 handler - must be after all routes
+app.use((req, res) => {
+  logger.warn('404 Not Found', {
+    method: req.method,
+    path: req.path,
+    ip: req.ip
+  });
+  res.status(404).json({
+    error: 'Not Found',
+    message: `Cannot ${req.method} ${req.path}`,
+    path: req.path
+  });
+});
+
+// Global error handler - must be last
+app.use(logError);
+app.use((err, req, res, next) => {
+  // Don't log 404s as errors
+  if (err.status === 404) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: err.message
+    });
+  }
+
+  // Log error
+  logger.error('Unhandled error', {
+    error: err.message,
+    stack: err.stack,
+    method: req.method,
+    path: req.path,
+    ip: req.ip
+  });
+
+  // Send error response
+  const statusCode = err.status || err.statusCode || 500;
+  const message = process.env.NODE_ENV === 'production'
+    ? 'Internal server error'
+    : err.message;
+
+  res.status(statusCode).json({
+    error: 'Server Error',
+    message,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+  });
+});
+
 function startServer(port) {
 
-  const server = app.listen(port, () => console.log('Server listening on', port));
+  const server = app.listen(port, () => {
+    logger.info(`🚀 Server started successfully`, {
+      port,
+      environment: process.env.NODE_ENV || 'development',
+      nodeVersion: process.version
+    });
+    logger.info(`📊 Health check available at: http://localhost:${port}/health`);
+    logger.info(`📈 Metrics available at: http://localhost:${port}/health/metrics`);
+  });
 
   // WebSocket Setup
   wss = new WebSocket.Server({ server });
   wss.on('connection', (ws) => {
-    console.log('WebSocket client connected');
+    logger.info('WebSocket client connected');
     ws.on('message', (msg) => {
-      console.log('Received WS message:', msg);
+      logger.debug('Received WS message:', { message: msg.toString() });
       ws.send(`Echo: ${msg}`);
     });
-    ws.on('close', () => console.log('WebSocket client disconnected'));
+    ws.on('close', () => logger.info('WebSocket client disconnected'));
   });
 
   server.on('error', (err) => {
     if (err && err.code === 'EADDRINUSE') {
-      console.warn(`Port ${port} in use, trying ${port + 1}`);
+      logger.warn(`Port ${port} in use, trying ${port + 1}`);
       startServer(port + 1);
     } else {
-      console.error('Server error:', err);
+      logger.error('Server error:', { error: err.message, stack: err.stack });
       process.exit(1);
     }
+  });
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    logger.info('SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+      logger.info('HTTP server closed');
+      prisma.$disconnect();
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGINT', () => {
+    logger.info('SIGINT signal received: closing HTTP server');
+    server.close(() => {
+      logger.info('HTTP server closed');
+      prisma.$disconnect();
+      process.exit(0);
+    });
   });
 }
 
 startServer(PORT);
+

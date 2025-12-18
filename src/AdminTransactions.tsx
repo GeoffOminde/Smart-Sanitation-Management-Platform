@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from './lib/api';
+import { useLocale } from './contexts/LocaleContext';
 
 type Transaction = {
-  id: number;
+  id: string;
   provider: string;
   email?: string;
   phone?: string;
@@ -12,6 +13,7 @@ type Transaction = {
 };
 
 const AdminTransactions = () => {
+  const { t } = useLocale();
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,7 @@ const AdminTransactions = () => {
 
   useEffect(() => { fetchTx(); }, []);
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       const resp = await apiFetch(`/api/admin/transactions/${id}`, { method: 'DELETE' });
       if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
@@ -46,19 +48,7 @@ const AdminTransactions = () => {
     }
   };
 
-  const handleSeed = async () => {
-    setLoading(true);
-    try {
-      const resp = await apiFetch('/api/admin/seed', { method: 'POST' });
-      if (!resp.ok) throw new Error(`Seed failed: ${resp.status}`);
-      await fetchTx();
-    } catch (err) {
-      console.error(err);
-      setError('Failed to seed demo transactions');
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   return (
     <div className="min-h-screen bg-gray-50/50">
@@ -71,18 +61,12 @@ const AdminTransactions = () => {
               <div className="text-white font-bold text-xl">Tb</div>
             </div>
             <div>
-              <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Admin Transactions</h2>
-              <p className="text-base text-gray-500 font-medium mt-1">Full transaction ledger and debugging</p>
+              <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{t('admin.transactions.title')}</h2>
+              <p className="text-base text-gray-500 font-medium mt-1">{t('admin.transactions.subtitle')}</p>
             </div>
           </div>
 
-          <button
-            onClick={handleSeed}
-            className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2"
-            disabled={loading}
-          >
-            {loading ? 'Processing...' : 'Seed Demo Transactions'}
-          </button>
+          {/* Seed button removed for production - no fake data in production DB */}
         </div>
 
         {error && (
@@ -93,28 +77,27 @@ const AdminTransactions = () => {
 
         <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
           <div className="p-6 border-b border-gray-100 bg-gray-50/30 flex justify-between items-center">
-            <h3 className="text-lg font-bold text-gray-900">Transaction Registry</h3>
+            <h3 className="text-lg font-bold text-gray-900">{t('admin.transactions.registry')}</h3>
             <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold uppercase tracking-wider">
-              {txs.length} Records
+              {txs.length} {t('admin.transactions.records')}
             </span>
           </div>
 
           {loading && txs.length === 0 ? (
-            <div className="p-12 text-center text-gray-500">Loading registry...</div>
+            <div className="p-12 text-center text-gray-500">{t('admin.transactions.loading')}</div>
           ) : txs.length === 0 ? (
-            <div className="p-12 text-center text-gray-500">No transactions found in the system.</div>
+            <div className="p-12 text-center text-gray-500">{t('admin.transactions.empty')}</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-gray-50/50 border-b border-gray-100">
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">ID</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Provider</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">User / Contact</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Amount</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Actions</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{t('admin.table.provider')}</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{t('admin.table.user')}</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">{t('admin.table.amount')}</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{t('admin.table.status')}</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{t('admin.table.date')}</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">{t('admin.table.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -128,18 +111,17 @@ const AdminTransactions = () => {
 
                     return (
                       <tr key={tx.id} className="hover:bg-gray-50/80 transition-colors group">
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">#{tx.id}</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${tx.provider === 'mpesa' ? 'bg-green-500' :
-                                tx.provider === 'paystack' ? 'bg-blue-500' : 'bg-gray-400'
+                              tx.provider === 'paystack' ? 'bg-blue-500' : 'bg-gray-400'
                               }`}></div>
                             <span className="text-sm font-semibold capitalize text-gray-700">{tx.provider}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm font-medium text-gray-900">{tx.email || tx.phone || 'Unknown'}</div>
-                          <div className="text-xs text-gray-400">{tx.provider === 'mpesa' ? 'Mobile Payment' : 'Card / Online'}</div>
+                          <div className="text-xs text-gray-400">{tx.provider === 'mpesa' ? 'Mobile Money' : 'Card Payment'}</div>
                         </td>
                         <td className="px-6 py-4 text-right">
                           <span className="text-sm font-bold text-gray-900">KSh {tx.amount.toLocaleString()}</span>
@@ -169,7 +151,7 @@ const AdminTransactions = () => {
                             <button
                               onClick={() => handleDelete(tx.id)}
                               className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
-                              title="Delete Record"
+                              title="Delete Transaction"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
@@ -184,7 +166,7 @@ const AdminTransactions = () => {
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

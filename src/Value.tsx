@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useLocale } from './contexts/LocaleContext';
+import { useSettings } from './contexts/SettingsContext';
 import { track } from './lib/analytics';
 import {
   BarChart3,
@@ -36,27 +38,11 @@ ChartJS.register(
   Filler
 );
 
-// Mock data generation functions
-const generateMonthlyData = () => {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'];
-  return months.map(month => ({
-    month,
-    value: Math.floor(Math.random() * 1000) + 500,
-    previous: Math.floor(Math.random() * 900) + 300
-  }));
-};
-
-const generateCohortData = () => {
-  const cohorts = ['Jan', 'Feb', 'Mar', 'Apr', 'May'];
-  return cohorts.map(cohort => ({
-    cohort,
-    d7: Math.floor(Math.random() * 100) + 20,
-    d30: Math.floor(Math.random() * 80) + 10,
-    d90: Math.floor(Math.random() * 60) + 5
-  }));
-};
+// Mock data functions removed in favor of real API data
 
 const Value = () => {
+  const { t } = useLocale();
+  const { formatCurrency } = useSettings();
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('30d');
   const [kpiData, setKpiData] = useState({
@@ -67,16 +53,12 @@ const Value = () => {
   });
   const [chartData, setChartData] = useState<any>(null);
   const [cohortData, setCohortData] = useState<any[]>([]);
-
-  // Format currency
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(value);
-  };
+  const [engagementData, setEngagementData] = useState({
+    wau: 0,
+    mau: 0,
+    stickiness: 0,
+    activeRatio: 0
+  });
 
   // Load data
   const loadData = async () => {
@@ -95,30 +77,17 @@ const Value = () => {
           uptime: { current: data.uptime, trend: 0.5 }
         });
 
-        // Use real revenue data for chart if available, else keep mock for now or mix
+        // Revenue Chart
         if (data.monthlyRevenue) {
+          const labels = Object.keys(data.monthlyRevenue);
+          const values = Object.values(data.monthlyRevenue);
+
           setChartData({
-            labels: Object.keys(data.monthlyRevenue),
+            labels: labels,
             datasets: [
               {
                 label: 'Revenue (Actual)',
-                data: Object.values(data.monthlyRevenue),
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                tension: 0.3,
-                fill: true
-              }
-            ]
-          });
-        } else {
-          // Fallback to mock if API doesn't return chart data yet
-          const monthlyData = generateMonthlyData();
-          setChartData({
-            labels: monthlyData.map(d => d.month),
-            datasets: [
-              {
-                label: 'This Year (Projected)',
-                data: monthlyData.map(d => d.value),
+                data: values,
                 borderColor: '#3b82f6',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 tension: 0.3,
@@ -127,21 +96,22 @@ const Value = () => {
             ]
           });
         }
-      } else {
-        // Fallback if API fails
-        const monthlyData = generateMonthlyData();
-        setChartData({
-          labels: monthlyData.map(d => d.month),
-          datasets: [{ label: 'Mock Data', data: monthlyData.map(d => d.value), borderColor: '#3b82f6', fill: true }]
-        });
+
+        // Cohorts
+        if (data.cohorts) {
+          setCohortData(data.cohorts);
+        }
+
+        // Engagement
+        if (data.engagement) {
+          setEngagementData(data.engagement);
+        }
+
       }
     } catch (e) {
       console.error("Failed to load ROI data", e);
     }
 
-    // Static Cohort data for now (hard to calculate without long history)
-    const cohorts = generateCohortData();
-    setCohortData(cohorts);
     setIsLoading(false);
   };
 
@@ -223,7 +193,7 @@ const Value = () => {
           {trend >= 0 ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingUp className="w-3 h-3 mr-1 transform rotate-180" />}
           {Math.abs(trend)}%
         </span>
-        <span className="text-xs text-gray-400 font-medium">vs last month</span>
+        <span className="text-xs text-gray-400 font-medium">{t('value.vsLastMonth')}</span>
       </div>
     </div>
   );
@@ -239,8 +209,8 @@ const Value = () => {
               <BarChart3 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Value & ROI</h2>
-              <p className="text-base text-gray-500 font-medium mt-1">Operational impact and financial performance</p>
+              <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{t('value.title')}</h2>
+              <p className="text-base text-gray-500 font-medium mt-1">{t('value.subtitle')}</p>
             </div>
           </div>
 
@@ -250,8 +220,8 @@ const Value = () => {
                 key={range}
                 onClick={() => setTimeRange(range)}
                 className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all duration-200 ${timeRange === range
-                    ? 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md'
-                    : 'text-gray-600 hover:bg-gray-50'
+                  ? 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md'
+                  : 'text-gray-600 hover:bg-gray-50'
                   }`}
               >
                 {range}
@@ -280,7 +250,7 @@ const Value = () => {
             {/* KPI Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <KPICard
-                title="Pickups Avoided"
+                title={t('value.pickups')}
                 value={kpiData.pickupsAvoided.current}
                 trend={kpiData.pickupsAvoided.trend}
                 icon={TrendingUp}
@@ -288,7 +258,7 @@ const Value = () => {
                 colorTo="to-teal-500"
               />
               <KPICard
-                title="Miles Reduced"
+                title={t('value.miles')}
                 value={kpiData.routeMilesReduced.current}
                 trend={kpiData.routeMilesReduced.trend}
                 icon={Clock}
@@ -296,7 +266,7 @@ const Value = () => {
                 colorTo="to-cyan-500"
               />
               <KPICard
-                title="Savings"
+                title={t('value.savings')}
                 value={kpiData.fuelSavings.current}
                 trend={kpiData.fuelSavings.trend}
                 icon={DollarSign}
@@ -305,7 +275,7 @@ const Value = () => {
                 isCurrency
               />
               <KPICard
-                title="Uptime SLA"
+                title={t('value.uptime')}
                 value={kpiData.uptime.current}
                 trend={kpiData.uptime.trend}
                 icon={Shield}
@@ -319,8 +289,8 @@ const Value = () => {
             <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-8">
               <div className="flex items-center justify-between mb-8">
                 <div>
-                  <h3 className="text-xl font-bold text-gray-900">Performance Over Time</h3>
-                  <p className="text-sm text-gray-500 mt-1">Revenue and efficiency trends correlation</p>
+                  <h3 className="text-xl font-bold text-gray-900">{t('value.performance')}</h3>
+                  <p className="text-sm text-gray-500 mt-1">{t('value.revenueTrend')}</p>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-200">
                   <Calendar className="w-4 h-4 text-gray-500" />
@@ -341,8 +311,8 @@ const Value = () => {
               <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
                 <div className="p-6 border-b border-gray-100 bg-gray-50/30 flex justify-between items-center">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">Retention Cohorts</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">User return rates over time</p>
+                    <h3 className="text-lg font-bold text-gray-900">{t('value.cohorts')}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{t('value.cohortsSubtitle')}</p>
                   </div>
                   <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold uppercase rounded-full tracking-wide">Beta</span>
                 </div>
@@ -350,25 +320,34 @@ const Value = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Cohort</th>
-                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Day 7</th>
-                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Day 30</th>
-                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Day 90</th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('value.table.cohort')}</th>
+                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('value.table.day7')}</th>
+                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('value.table.day30')}</th>
+                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('value.table.day90')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {cohortData.map((row, i) => (
-                        <tr key={i} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">{row.cohort}</td>
-                          <td className="px-6 py-4 text-right">
-                            <span className={`px-2 py-1 rounded-md text-sm font-medium ${row.d7 > 80 ? 'bg-green-100 text-green-700' : 'text-gray-600'}`}>{row.d7}%</span>
+                      {cohortData.length > 0 ? (
+                        cohortData.map((row, i) => (
+                          <tr key={i} className="hover:bg-blue-50/30 transition-colors">
+                            <td className="px-6 py-4 text-sm font-semibold text-gray-900">{row.cohort}</td>
+                            <td className="px-6 py-4 text-right">
+                              <span className={`px-2 py-1 rounded-md text-sm font-medium ${row.d7 > 80 ? 'bg-green-100 text-green-700' : 'text-gray-600'}`}>{row.d7}%</span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <span className={`px-2 py-1 rounded-md text-sm font-medium ${row.d30 > 50 ? 'bg-green-100 text-green-700' : 'text-gray-600'}`}>{row.d30}%</span>
+                            </td>
+                            <td className="px-6 py-4 text-right text-sm text-gray-500">{row.d90}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-gray-500 italic bg-gray-50/50">
+                            No cohort data available yet. Waiting for more user history.
                           </td>
-                          <td className="px-6 py-4 text-right">
-                            <span className={`px-2 py-1 rounded-md text-sm font-medium ${row.d30 > 50 ? 'bg-green-100 text-green-700' : 'text-gray-600'}`}>{row.d30}%</span>
-                          </td>
-                          <td className="px-6 py-4 text-right text-sm text-gray-500">{row.d90}%</td>
                         </tr>
-                      ))}
+                      )}
+
                     </tbody>
                   </table>
                 </div>
@@ -378,8 +357,8 @@ const Value = () => {
               <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-6 flex flex-col justify-center">
                 <div className="flex items-center justify-between mb-8">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">User Engagement</h3>
-                    <p className="text-xs text-gray-500">Activity metrics overview</p>
+                    <h3 className="text-lg font-bold text-gray-900">{t('value.engagement')}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{t('value.engagementSubtitle')}</p>
                   </div>
                   <div className="p-2 bg-blue-50 rounded-xl">
                     <Users className="w-5 h-5 text-blue-600" />
@@ -390,22 +369,22 @@ const Value = () => {
                   {/* WAU */}
                   <div>
                     <div className="flex justify-between items-end mb-2">
-                      <span className="text-sm font-medium text-gray-600">On-Platform Time (Avg)</span>
-                      <span className="text-xl font-bold text-gray-900">42m</span>
+                      <span className="text-sm font-medium text-gray-600">Weekly Users (WAU)</span>
+                      <span className="text-xl font-bold text-gray-900">{engagementData.wau}</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full w-[78%]"></div>
+                      <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full" style={{ width: `${Math.min(engagementData.wau * 5, 100)}%` }}></div>
                     </div>
                   </div>
 
                   {/* MAU */}
                   <div>
                     <div className="flex justify-between items-end mb-2">
-                      <span className="text-sm font-medium text-gray-600">Active Units Ratio</span>
-                      <span className="text-xl font-bold text-gray-900">94.2%</span>
+                      <span className="text-sm font-medium text-gray-600">Monthly Users (MAU)</span>
+                      <span className="text-xl font-bold text-gray-900">{engagementData.mau}</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full w-[94%]"></div>
+                      <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full" style={{ width: `${Math.min(engagementData.mau * 2, 100)}%` }}></div>
                     </div>
                   </div>
                 </div>
@@ -418,7 +397,7 @@ const Value = () => {
                       <span className="w-8 h-8 rounded-full bg-gray-400 border-2 border-white"></span>
                     </div>
                     <div className="text-sm text-gray-500">
-                      <span className="font-bold text-gray-900">Stickiness Rate 43.5%</span> (WAU/MAU)
+                      <span className="font-bold text-gray-900">{t('value.metric.stickiness')} {engagementData.stickiness}%</span> (WAU/MAU)
                     </div>
                   </div>
                 </div>

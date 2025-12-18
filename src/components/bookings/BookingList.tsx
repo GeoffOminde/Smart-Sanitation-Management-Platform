@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBookings } from '../../contexts/BookingContext';
 import { format } from 'date-fns';
 import { Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2, Filter, X } from 'lucide-react';
@@ -42,6 +43,7 @@ const BookingList: React.FC = () => {
     setSelectedBooking
   } = useBookings();
 
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilters, setStatusFilters] = useState<BookingStatus[]>([]);
@@ -56,7 +58,7 @@ const BookingList: React.FC = () => {
   };
 
   const handleStatusFilter = (status: BookingStatus) => {
-    setStatusFilters(prev => 
+    setStatusFilters(prev =>
       prev.includes(status)
         ? prev.filter(s => s !== status)
         : [...prev, status]
@@ -141,7 +143,7 @@ const BookingList: React.FC = () => {
                 onKeyPress={(e) => e.key === 'Enter' && applyFilters()}
               />
             </div>
-            
+
             <button
               type="button"
               onClick={() => setShowFilters(!showFilters)}
@@ -155,7 +157,7 @@ const BookingList: React.FC = () => {
                 </span>
               )}
             </button>
-            
+
             <button
               type="button"
               onClick={clearFilters}
@@ -192,11 +194,11 @@ const BookingList: React.FC = () => {
                   ))}
                 </div>
               </div>
-              
+
               {/* Add more filter options here */}
-              
+
             </div>
-            
+
             <div className="mt-4 flex justify-end space-x-3">
               <button
                 type="button"
@@ -222,8 +224,8 @@ const BookingList: React.FC = () => {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th 
-                scope="col" 
+              <th
+                scope="col"
                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                 onClick={() => handleSort('customer.name')}
               >
@@ -232,8 +234,8 @@ const BookingList: React.FC = () => {
                   {getSortIcon('customer.name')}
                 </div>
               </th>
-              <th 
-                scope="col" 
+              <th
+                scope="col"
                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                 onClick={() => handleSort('unit.name')}
               >
@@ -242,8 +244,8 @@ const BookingList: React.FC = () => {
                   {getSortIcon('unit.name')}
                 </div>
               </th>
-              <th 
-                scope="col" 
+              <th
+                scope="col"
                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                 onClick={() => handleSort('dateRange.start')}
               >
@@ -252,8 +254,8 @@ const BookingList: React.FC = () => {
                   {getSortIcon('dateRange.start')}
                 </div>
               </th>
-              <th 
-                scope="col" 
+              <th
+                scope="col"
                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                 onClick={() => handleSort('status')}
               >
@@ -262,8 +264,8 @@ const BookingList: React.FC = () => {
                   {getSortIcon('status')}
                 </div>
               </th>
-              <th 
-                scope="col" 
+              <th
+                scope="col"
                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
                 onClick={() => handleSort('payment.amount')}
               >
@@ -312,7 +314,7 @@ const BookingList: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <button
-                      onClick={() => setSelectedBooking(booking)}
+                      onClick={() => navigate(`/bookings/${booking.id}`)}
                       className="text-blue-600 hover:text-blue-900 mr-4"
                     >
                       View

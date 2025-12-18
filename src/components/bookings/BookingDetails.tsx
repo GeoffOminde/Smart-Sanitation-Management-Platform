@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 import { ArrowLeft, Edit, Trash2, CheckCircle, XCircle, Clock, Calendar, Phone, Mail, User, Building, CreditCard } from 'lucide-react';
 import { useBookings } from '../../contexts/BookingContext';
+import { useSettings } from '../../contexts/SettingsContext';
 import { Booking } from '../../types/booking';
 import BookingForm from './BookingForm';
 
@@ -10,6 +11,7 @@ const BookingDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getBooking, deleteBooking, updateBooking } = useBookings();
+  const { formatCurrency } = useSettings();
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,10 +21,10 @@ const BookingDetails: React.FC = () => {
   useEffect(() => {
     const loadBooking = async () => {
       if (!id) return;
-      
+
       setLoading(true);
       setError(null);
-      
+
       try {
         const data = await getBooking(id);
         setBooking(data);
@@ -39,7 +41,7 @@ const BookingDetails: React.FC = () => {
 
   const handleDelete = async () => {
     if (!id) return;
-    
+
     if (!window.confirm('Are you sure you want to delete this booking? This action cannot be undone.')) {
       return;
     }
@@ -47,7 +49,7 @@ const BookingDetails: React.FC = () => {
     setIsDeleting(true);
     try {
       await deleteBooking(id);
-      navigate('/bookings');
+      navigate('/dashboard', { state: { tab: 'bookings' } });
     } catch (err) {
       setError('Failed to delete booking');
       console.error('Error deleting booking:', err);
@@ -57,7 +59,7 @@ const BookingDetails: React.FC = () => {
 
   const handleStatusChange = async (newStatus: Booking['status']) => {
     if (!id || !booking) return;
-    
+
     try {
       const updatedBooking = await updateBooking(id, { status: newStatus });
       setBooking(updatedBooking);
@@ -102,11 +104,11 @@ const BookingDetails: React.FC = () => {
         <p className="mt-1 text-sm text-gray-500">The requested booking could not be found.</p>
         <div className="mt-6">
           <button
-            onClick={() => navigate('/bookings')}
+            onClick={() => navigate('/dashboard', { state: { tab: 'bookings' } })}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <ArrowLeft className="-ml-1 mr-2 h-5 w-5" />
-            Back to Bookings
+            Back to Dashboard
           </button>
         </div>
       </div>
@@ -125,9 +127,9 @@ const BookingDetails: React.FC = () => {
           </button>
           <h2 className="text-2xl font-bold text-gray-900">Edit Booking</h2>
         </div>
-        <BookingForm 
-          bookingId={booking.id} 
-          onSuccess={() => handleUpdateSuccess(booking)} 
+        <BookingForm
+          bookingId={booking.id}
+          onSuccess={() => handleUpdateSuccess(booking)}
         />
       </div>
     );
@@ -140,14 +142,6 @@ const BookingDetails: React.FC = () => {
     } catch (e) {
       return 'Invalid date';
     }
-  };
-
-  const formatCurrency = (amount: number, currency: string = 'KES') => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-    }).format(amount);
   };
 
   const getStatusBadge = (status: string) => {
@@ -168,9 +162,8 @@ const BookingDetails: React.FC = () => {
     };
 
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-        statusClasses[status as keyof typeof statusClasses] || 'bg-gray-100 text-gray-800'
-      }`}>
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClasses[status as keyof typeof statusClasses] || 'bg-gray-100 text-gray-800'
+        }`}>
         {statusText[status as keyof typeof statusText] || status}
       </span>
     );
@@ -181,7 +174,7 @@ const BookingDetails: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
         <div className="flex items-center mb-4 sm:mb-0">
           <button
-            onClick={() => navigate('/bookings')}
+            onClick={() => navigate('/dashboard', { state: { tab: 'bookings' } })}
             className="mr-4 p-1 rounded-full hover:bg-gray-100"
           >
             <ArrowLeft className="h-5 w-5 text-gray-500" />
@@ -288,7 +281,7 @@ const BookingDetails: React.FC = () => {
                   <Clock className="h-5 w-5 text-gray-400 mr-2" />
                   <span>
                     {Math.ceil(
-                      (new Date(booking.dateRange.end).getTime() - new Date(booking.dateRange.start).getTime()) / 
+                      (new Date(booking.dateRange.end).getTime() - new Date(booking.dateRange.start).getTime()) /
                       (1000 * 60 * 60 * 24)
                     )} days
                   </span>
@@ -303,7 +296,7 @@ const BookingDetails: React.FC = () => {
                 <div className="flex items-center mb-2">
                   <CreditCard className="h-5 w-5 text-gray-400 mr-2" />
                   <span>
-                    {formatCurrency(booking.payment.amount, booking.payment.currency)}
+                    {formatCurrency(booking.payment.amount)}
                     <span className="text-gray-500 ml-2">
                       ({booking.payment.status.charAt(0).toUpperCase() + booking.payment.status.slice(1)})
                     </span>

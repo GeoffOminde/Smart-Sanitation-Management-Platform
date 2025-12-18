@@ -1,11 +1,13 @@
 // src/components/Dashboard.tsx
 // Refreshed Build 1
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import LiveFleetMap from './LiveFleetMap';
+import { useLocation } from 'react-router-dom';
 // import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiFetch } from '../lib/api';
 import { useLocale } from '../contexts/LocaleContext';
+import { useSettings } from '../contexts/SettingsContext';
 import {
   MapPin,
   Truck,
@@ -34,6 +36,9 @@ import {
   Bell,
   User,
   Building,
+  Wifi,
+  Phone,
+  Loader2,
 } from 'lucide-react';
 import {
   ForecastResult,
@@ -43,11 +48,15 @@ import {
   rankUnitsByMaintenance,
 } from '../lib/heuristics';
 
-import Insights from '../Insights';
-import Maintenance from './Maintenance';
-import Analytics from './Analytics';
-import Assistant from '../Assistant';
-import Billing from '../Billing';
+// Lazy load heavy components for better performance
+const Insights = lazy(() => import('../Insights'));
+const Maintenance = lazy(() => import('./Maintenance'));
+const Analytics = lazy(() => import('./Analytics'));
+const Assistant = lazy(() => import('../Assistant'));
+const Billing = lazy(() => import('../Billing'));
+import BookingList from './bookings/BookingList';
+import BookingForm from './bookings/BookingForm';
+import { useBookings } from '../contexts/BookingContext';
 
 /**
  * This Dashboard.tsx is a consolidated, lint-cleaned component reconstructed
@@ -61,15 +70,23 @@ import Billing from '../Billing';
 interface Unit {
   id: string;
   serialNo: string;
+  type: string; // 'Standard Portable' | 'Deluxe Portable' | 'Wheelchair Accessible'
   location: string;
   fillLevel: number;
   batteryLevel: number;
   status: 'active' | 'maintenance' | 'offline';
   lastSeen: string;
   coordinates: [number, number];
-  predictedFullDate?: string; // New field from enhanced AI
-  riskScore?: number;        // New field from enhanced AI
-  recommendation?: string;   // New field from enhanced AI
+  // IoT Sensor Data
+  temperature?: number;
+  humidity?: number;
+  odorLevel?: number;
+  usageCount?: number;
+  lastServiceDate?: string;
+  // AI fields
+  predictedFullDate?: string;
+  riskScore?: number;
+  recommendation?: string;
 }
 
 interface Route {
@@ -80,6 +97,7 @@ interface Route {
   estimatedTime: string;
   priority: 'high' | 'medium' | 'low';
   unitId?: string;
+  technicianId?: string;
 }
 
 interface Booking {
@@ -162,12 +180,66 @@ const getBookingStatusColor = (s: Booking['status'] | Booking['paymentStatus']) 
 
 /* -------------------------- Main Component --------------------------- */
 
-const Dashboard: React.FC = () => {
+interface DashboardProps {
+  initialTab?: string;
+}
+
+
+const Dashboard: React.FC<DashboardProps> = ({ initialTab = 'overview' }) => {
   // contexts
   const { locale, setLocale, t } = useLocale();
+  const { settings: globalSettings, updateSettings: updateGlobalSettings } = useSettings();
+  const location = useLocation();
 
-  // layout
-  const [activeTab, setActiveTab] = useState<string>('overview');
+  // layout - Load from localStorage or use initialTab
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const savedTab = localStorage.getItem('dashboardActiveTab');
+    return savedTab || initialTab;
+  });
+
+  // Booking Context Integration
+  const { fetchBookings: refreshBookings, selectedBooking, setSelectedBooking } = useBookings();
+
+  // Save active tab to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('dashboardActiveTab', activeTab);
+  }, [activeTab]);
+
+  // Only update from initialTab if it's explicitly set (not the default 'overview')
+  useEffect(() => {
+    if (initialTab !== 'overview') {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    // Cast to any to access custom state properties
+    const state = location.state as { tab?: string } | null;
+    if (state?.tab) {
+      setActiveTab(state.tab);
+    }
+  }, [location.state]);
+
+  // Sync selected booking from list to modal
+  useEffect(() => {
+    if (selectedBooking) {
+      // Map complex Booking object to flat form state
+      setEditingBookingId(selectedBooking.id);
+      setFormCustomer(selectedBooking.customer.name || '');
+      setFormUnit(selectedBooking.unit.name || '');
+      // Handle nested dateRange vs date string mismatch safely
+      setFormDate(selectedBooking.dateRange?.start ? new Date(selectedBooking.dateRange.start).toISOString().split('T')[0] : '');
+      setFormDuration('1 day'); // Default or extract if available
+      setFormAmount(selectedBooking.payment?.amount || 0);
+      setFormStatus(selectedBooking.status as any); // Cast status
+      setFormPaymentStatus(selectedBooking.payment?.status === 'paid' ? 'paid' : 'pending');
+
+      setBookingModalOpen(true);
+      // Clear selection so we don't loop or stuck
+      setSelectedBooking(null);
+    }
+  }, [selectedBooking, setSelectedBooking]);
+
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
@@ -181,7 +253,7 @@ const Dashboard: React.FC = () => {
       { id: 'maintenance', label: t('dashboard.maintenanceTab') || 'Maintenance', icon: Wrench },
       { id: 'analytics', label: t('dashboard.analyticsTab') || 'Analytics', icon: TrendingUp },
       { id: 'insights', label: t('dashboard.insightsTab') || 'Insights', icon: BarChart3 },
-      { id: 'billing', label: 'Billing', icon: DollarSign },
+      { id: 'billing', label: t('billing.title') || 'Billing', icon: DollarSign },
       { id: 'settings', label: t('dashboard.settingsTab') || 'Settings', icon: Settings },
     ],
     [t],
@@ -244,25 +316,128 @@ const Dashboard: React.FC = () => {
   const generateCortexReport = async () => {
     setCortexReportLoading(true);
     try {
-      // simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Calculate real statistics
+      const totalUnits = units.length;
+      const activeUnits = units.filter(u => u.status === 'active').length;
+      const maintenanceUnits = units.filter(u => u.status === 'maintenance').length;
+      const offlineUnits = units.filter(u => u.status === 'offline').length;
+      const avgFillLevel = units.length > 0 ? units.reduce((sum, u) => sum + u.fillLevel, 0) / units.length : 0;
+      const avgBatteryLevel = units.length > 0 ? units.reduce((sum, u) => sum + u.batteryLevel, 0) / units.length : 0;
 
+      const totalRoutes = routes.length;
+      const activeRoutes = routes.filter(r => r.status === 'active').length;
+      const completedRoutes = routes.filter(r => r.status === 'completed').length;
+      const pendingRoutes = routes.filter(r => r.status === 'pending').length;
+
+      const totalBookings = bookings.length;
+      const confirmedBookings = bookings.filter(b => b.status === 'confirmed').length;
+      const pendingBookings = bookings.filter(b => b.status === 'pending').length;
+      const totalRevenue = bookings.reduce((sum, b) => sum + b.amount, 0);
+
+      const totalTeamMembers = teamMembers.length;
+      const activeTeamMembers = teamMembers.filter(m => m.status === 'active').length;
+
+      // Critical alerts
+      const criticalUnits = units.filter(u => u.fillLevel > 80 || u.batteryLevel < 20);
+      const highFillUnits = units.filter(u => u.fillLevel > 80);
+      const lowBatteryUnits = units.filter(u => u.batteryLevel < 20);
+
+      // Generate comprehensive report
       const report = `
-CORTEX AI - FLEET ANALYSIS REPORT
---------------------------------
-Date: ${new Date().toLocaleDateString()}
-Status: OPTIMAL
+╔═══════════════════════════════════════════════════════════════╗
+║        SMART SANITATION MANAGEMENT - FULL REPORT            ║
+╚═══════════════════════════════════════════════════════════════╝
 
-SUMMARY:
-- 98% Fleet Uptime
-- 12% Revenue Growth
-- 3 Maintenance Risks Detected
+Generated: ${new Date().toLocaleString()}
+Report Period: ${new Date().toLocaleDateString()}
 
-Forecast:
-- Peak demand expected: Friday
-- Recommendation: Increase capacity by 15%
-`;
-      alert(report);
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 FLEET OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Units: ${totalUnits}
+  • Active: ${activeUnits} (${totalUnits > 0 ? ((activeUnits / totalUnits) * 100).toFixed(1) : 0}%)
+  • Maintenance: ${maintenanceUnits}
+  • Offline: ${offlineUnits}
+
+Average Fill Level: ${avgFillLevel.toFixed(1)}%
+Average Battery Level: ${avgBatteryLevel.toFixed(1)}%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚛 ROUTES & OPERATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Routes: ${totalRoutes}
+  • Active: ${activeRoutes}
+  • Completed: ${completedRoutes}
+  • Pending: ${pendingRoutes}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 BOOKINGS & REVENUE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Bookings: ${totalBookings}
+  • Confirmed: ${confirmedBookings}
+  • Pending: ${pendingBookings}
+
+Total Revenue: KSh ${totalRevenue.toLocaleString()}
+Average Booking Value: KSh ${totalBookings > 0 ? (totalRevenue / totalBookings).toFixed(2) : 0}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👥 TEAM MANAGEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Team Members: ${totalTeamMembers}
+Active Members: ${activeTeamMembers}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️  CRITICAL ALERTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${criticalUnits.length === 0 ? '✅ No critical alerts' : `
+🔴 Units Requiring Attention: ${criticalUnits.length}
+  • High Fill Level (>80%): ${highFillUnits.length}
+  • Low Battery (<20%): ${lowBatteryUnits.length}
+
+Critical Units:
+${criticalUnits.slice(0, 5).map(u => `  • ${u.serialNo}: Fill ${u.fillLevel}%, Battery ${u.batteryLevel}%`).join('\n')}
+${criticalUnits.length > 5 ? `  ... and ${criticalUnits.length - 5} more` : ''}
+`}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 KEY PERFORMANCE INDICATORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Fleet Utilization: ${totalUnits > 0 ? ((activeUnits / totalUnits) * 100).toFixed(1) : 0}%
+Route Completion Rate: ${totalRoutes > 0 ? ((completedRoutes / totalRoutes) * 100).toFixed(1) : 0}%
+Booking Confirmation Rate: ${totalBookings > 0 ? ((confirmedBookings / totalBookings) * 100).toFixed(1) : 0}%
+Team Availability: ${totalTeamMembers > 0 ? ((activeTeamMembers / totalTeamMembers) * 100).toFixed(1) : 0}%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 RECOMMENDATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${avgFillLevel > 70 ? '• Schedule additional pickups - average fill level is high\n' : ''}${lowBatteryUnits.length > 0 ? `• Charge ${lowBatteryUnits.length} units with low battery\n` : ''}${maintenanceUnits.length > 2 ? `• ${maintenanceUnits.length} units in maintenance - consider fleet expansion\n` : ''}${pendingBookings > confirmedBookings ? '• Follow up on pending bookings to improve conversion\n' : ''}${activeRoutes === 0 && pendingRoutes > 0 ? '• Activate pending routes to improve service delivery\n' : ''}${criticalUnits.length === 0 && activeUnits === totalUnits ? '✅ Fleet is operating optimally\n' : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Report generated by Smart Sanitation Management Platform
+For support: ${settings.contactEmail}
+      `;
+
+      // Display report in alert
+      alert(report.trim());
+
+      // Optionally, you could also download as a file
+      const blob = new Blob([report], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sanitation-report-${new Date().toISOString().split('T')[0]}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
     } catch (e) {
       console.error(e);
       alert('Failed to generate report');
@@ -271,8 +446,6 @@ Forecast:
     }
   };
 
-
-  /* -------------------------- Sample persistent state -------------------------- */
 
   /* -------------------------- Persistent State via API -------------------------- */
   const [units, setUnits] = useState<Unit[]>([]);
@@ -287,26 +460,95 @@ Forecast:
     sessionTimeout: '30',
     emailNotifications: true,
     whatsappNotifications: true,
+    theme: 'light',
+    currency: 'KES',
   });
+
+  // Use centralized formatCurrency from SettingsContext
+  const { formatCurrency } = globalSettings ? {
+    formatCurrency: (amount: number) => {
+      const currencySymbols: Record<string, string> = {
+        'KES': 'KES',
+        'USD': '$',
+        'EUR': '€',
+        'GBP': '£',
+      };
+      const symbol = currencySymbols[globalSettings.currency] || 'KES';
+      return `${symbol} ${amount.toLocaleString()}`;
+    }
+  } : { formatCurrency: (amount: number) => `KES ${amount.toLocaleString()}` };
+
+
+  // Notification system
+  const showNotification = (message: string, type: 'email' | 'whatsapp' | 'both' = 'both') => {
+    if (type === 'email' && settings.emailNotifications) {
+      console.log('📧 Email notification:', message);
+      // In production, this would send an actual email
+    }
+    if (type === 'whatsapp' && settings.whatsappNotifications) {
+      console.log('💬 WhatsApp notification:', message);
+      // In production, this would send a WhatsApp message
+    }
+    if (type === 'both') {
+      if (settings.emailNotifications) console.log('📧 Email notification:', message);
+      if (settings.whatsappNotifications) console.log('💬 WhatsApp notification:', message);
+    }
+  };
+
+  // Apply theme
+  useEffect(() => {
+    if (settings.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings.theme]);
+
+  // Session timeout implementation
+  const [lastActivity, setLastActivity] = useState(Date.now());
+
+  useEffect(() => {
+    const handleActivity = () => setLastActivity(Date.now());
+
+    // Track user activity
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keypress', handleActivity);
+    window.addEventListener('click', handleActivity);
+    window.addEventListener('scroll', handleActivity);
+
+    // Check for session timeout
+    const timeoutInterval = setInterval(() => {
+      const timeoutMinutes = parseInt(settings.sessionTimeout) || 30;
+      const timeoutMs = timeoutMinutes * 60 * 1000;
+      const timeSinceActivity = Date.now() - lastActivity;
+
+      if (timeSinceActivity > timeoutMs) {
+        alert(`Session expired after ${timeoutMinutes} minutes of inactivity. Please log in again.`);
+        // In a real app, you would redirect to login
+        window.location.reload();
+      }
+    }, 60000); // Check every minute
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keypress', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('scroll', handleActivity);
+      clearInterval(timeoutInterval);
+    };
+  }, [settings.sessionTimeout, lastActivity]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const teamMemberMap = useMemo(() => new Map(teamMembers.map((m) => [m.id, m])), [teamMembers]);
 
   // Save settings function
   const saveSettings = async () => {
     setSavingSettings(true);
     setSettingsSaved(false);
     try {
-      const resp = await apiFetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...settings, userId: 'admin-user' })
-      });
-
-      if (!resp.ok) {
-        throw new Error('Failed to save settings');
-      }
-
-      const data = await resp.json();
+      await updateGlobalSettings(settings);
       setSettingsSaved(true);
 
       // Hide success message after 3 seconds
@@ -322,6 +564,7 @@ Forecast:
 
   /* -------------------------- Data Fetching -------------------------- */
   const fetchAll = async () => {
+    setIsRefreshing(true);
     try {
       const [uRes, rRes, bRes, mRes, sRes] = await Promise.all([
         apiFetch('/api/units'),
@@ -333,27 +576,49 @@ Forecast:
 
       if (uRes.ok) {
         const raw = await uRes.json();
-        // Parse coordinates string "lat,lng" to [lat, lng]
         const parsed = raw.map((u: any) => ({
           ...u,
-          coordinates: typeof u.coordinates === 'string' && u.coordinates.includes(',')
-            ? u.coordinates.split(',').map((n: string) => Number(n.trim()))
-            : [-1.2921, 36.8219] // Default Nairobi
+          coordinates: Array.isArray(u.coordinates)
+            ? u.coordinates
+            : (typeof u.coordinates === 'string' && u.coordinates.includes(',')
+              ? u.coordinates.split(',').map((n: string) => Number(n.trim()))
+              : [-1.2921, 36.8219]) // Default Nairobi
         }));
         setUnits(parsed);
       }
       if (rRes.ok) setRoutes(await rRes.json());
       if (bRes.ok) setBookings(await bRes.json());
       if (mRes.ok) setTeamMembers(await mRes.json());
-      if (sRes.ok) setSettings(await sRes.json());
+      if (sRes.ok) {
+        const apiSettings = await sRes.json();
+        setSettings(prev => ({ ...prev, ...apiSettings }));
+      }
     } catch (err) {
       console.error('Failed to load dashboard data', err);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
     fetchAll();
+    // Real-time polling every 5 seconds for live fleet positions
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Sync local settings with global settings
+  useEffect(() => {
+    if (globalSettings) {
+      setSettings(prev => ({
+        ...prev,
+        currency: globalSettings.currency,
+        theme: globalSettings.theme,
+        language: globalSettings.language,
+      }));
+    }
+  }, [globalSettings]);
+
 
   /* -------------------------- UI Modals & Forms -------------------------- */
   const [unitModalOpen, setUnitModalOpen] = useState<boolean>(false);
@@ -366,6 +631,7 @@ Forecast:
   const [routeModalOpen, setRouteModalOpen] = useState<boolean>(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [formTech, setFormTech] = useState<string>('');
+  const [formTechId, setFormTechId] = useState<string>('');
   const [formRouteUnits, setFormRouteUnits] = useState<number>(1);
   const [formRouteStatus, setFormRouteStatus] = useState<RouteStatus>('pending');
   const [formRoutePriority, setFormRoutePriority] = useState<RoutePriority>('medium');
@@ -412,15 +678,16 @@ Forecast:
   useEffect(() => {
     if (!units.length) return;
     try {
-      const result = forecastDemand(bookings, 30, sbCapacity);
+      // Pass t to the heuristics functions
+      const result = forecastDemand(bookings, 30, sbCapacity, t);
       setForecast(result);
-      setAiAlerts(generatePrescriptiveAlerts(units, result));
+      setAiAlerts(generatePrescriptiveAlerts(units, result, t));
       setTopRisks(rankUnitsByMaintenance(units).slice(0, 3));
     } catch {
       // ignore if heuristics not available or fail
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [units, bookings, sbCapacity]);
+  }, [units, bookings, sbCapacity, t]);
 
   useEffect(() => {
     const loadRecommendation = async () => {
@@ -498,10 +765,37 @@ Forecast:
     }
   };
 
+  /* -------------------------- IoT Simulation -------------------------- */
+  const simulateIoT = async () => {
+    if (units.length === 0) return;
+    const randomUnit = units[Math.floor(Math.random() * units.length)];
+    const newFill = Math.min(100, Math.max(0, randomUnit.fillLevel + (Math.random() * 20 - 5)));
+    const newBatt = Math.max(0, randomUnit.batteryLevel - (Math.random() * 5));
+
+    try {
+      const resp = await apiFetch('/api/iot/telemetry', {
+        method: 'POST',
+        data: {
+          serialNo: randomUnit.serialNo,
+          fillLevel: newFill.toFixed(1),
+          batteryLevel: newBatt.toFixed(1)
+        }
+      });
+      if (resp.ok) {
+        // eslint-disable-next-line no-alert
+        alert(`IoT Signal: Updated ${randomUnit.serialNo}\nFill: ${newFill.toFixed(1)}%\nBatt: ${newBatt.toFixed(1)}%`);
+        fetchAll();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   /* -------------------------- Routes CRUD -------------------------- */
   const openCreateRoute = () => {
     setEditingRouteId(null);
     setFormTech(teamMembers[0]?.name || 'Technician');
+    setFormTechId(teamMembers[0]?.id || '');
     setFormRouteUnits(1);
     setFormRouteStatus('pending');
     setFormRoutePriority('medium');
@@ -513,6 +807,7 @@ Forecast:
   const openEditRoute = (r: Route) => {
     setEditingRouteId(r.id);
     setFormTech(r.technician);
+    setFormTechId(r.technicianId || '');
     setFormRouteUnits(r.units);
     setFormRouteStatus(r.status);
     setFormRoutePriority(r.priority);
@@ -525,6 +820,7 @@ Forecast:
   const saveRoute = async () => {
     const payload = {
       technician: formTech.trim() || 'Technician',
+      technicianId: formTechId,
       units: Number(formRouteUnits) || 1,
       status: formRouteStatus,
       priority: formRoutePriority,
@@ -683,6 +979,7 @@ Forecast:
           const updated = await resp.json();
           setBookings((prev) => prev.map((b) => (b.id === editingBookingId ? updated : b)));
           setBookingModalOpen(false);
+          refreshBookings(); // Refresh the list via context
           alert('Booking updated successfully!');
         } else {
           alert('Failed to update booking. Please try again.');
@@ -713,6 +1010,7 @@ Forecast:
             }).catch(console.error);
           }
           setBookingModalOpen(false);
+          refreshBookings(); // Refresh the list via context
           alert('Booking created successfully!');
         } else {
           const errData = await resp.json().catch(() => ({}));
@@ -808,34 +1106,88 @@ Forecast:
     }
   };
 
+  /* -------------------------- Revenue Calculations -------------------------- */
+
+  // Calculate daily revenue from bookings
+  const dailyRevenue = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Today's revenue (paid bookings)
+    const todayRevenue = bookings
+      .filter(b => {
+        const bookingDate = new Date(b.date);
+        bookingDate.setHours(0, 0, 0, 0);
+        return bookingDate.getTime() === today.getTime() && b.paymentStatus === 'paid';
+      })
+      .reduce((sum, b) => sum + (b.amount || 0), 0);
+
+    // Yesterday's revenue
+    const yesterdayRevenue = bookings
+      .filter(b => {
+        const bookingDate = new Date(b.date);
+        bookingDate.setHours(0, 0, 0, 0);
+        return bookingDate.getTime() === yesterday.getTime() && b.paymentStatus === 'paid';
+      })
+      .reduce((sum, b) => sum + (b.amount || 0), 0);
+
+    // Calculate percentage change
+    const percentageChange = yesterdayRevenue > 0
+      ? ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100
+      : todayRevenue > 0 ? 100 : 0;
+
+    return {
+      today: todayRevenue,
+      yesterday: yesterdayRevenue,
+      change: percentageChange
+    };
+  }, [bookings]);
+
   /* -------------------------- Small render helpers -------------------------- */
 
 
   /* -------------------------- Tab renderers -------------------------- */
 
   const renderOverview = () => (
-    <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
-      {/* Hero Welcome Section */}
-      <div className="relative rounded-3xl overflow-hidden bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-900 shadow-2xl text-white p-8 md:p-10">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2672&auto=format&fit=crop')] mix-blend-overlay opacity-20 bg-cover bg-center"></div>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Modern Hero Welcome Section */}
+      <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 border border-blue-100/50 p-8">
+        <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.5))] opacity-30"></div>
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="px-3 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-full text-xs font-semibold uppercase tracking-wider">System Online</span>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm border border-blue-200/50 rounded-full shadow-sm">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">{t('dashboard.systemStatus')}</span>
+              </div>
             </div>
-            <h2 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-200">
-              Welcome back, Administrator
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+              {t('dashboard.welcome')}
             </h2>
-            <p className="text-blue-100/80 mt-2 text-lg max-w-xl">
-              Real-time telemetry indicates optimal performance across the sanitation fleet. 98% operational uptime today.
+            <p className="text-gray-600 max-w-xl text-base">
+              {t('dashboard.telemetry')}
             </p>
           </div>
           <div className="flex gap-3">
-            <button onClick={() => setActiveTab('bookings')} className="bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white px-5 py-3 rounded-xl font-medium transition-all flex items-center shadow-lg hover:shadow-xl hover:-translate-y-0.5">
-              <Plus className="w-5 h-5 mr-2" /> New Booking
+            <button
+              onClick={() => setActiveTab('bookings')}
+              className="group px-5 py-3 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 rounded-xl font-medium transition-all flex items-center gap-2 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+            >
+              <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
+              {t('dashboard.newBooking')}
             </button>
-            <button onClick={() => setActiveTab('routes')} className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white px-5 py-3 rounded-xl font-medium shadow-lg shadow-blue-500/30 transition-all flex items-center hover:-translate-y-0.5">
-              <Navigation className="w-5 h-5 mr-2" /> Dispatch Route
+            <button
+              onClick={() => setActiveTab('routes')}
+              className="px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-medium shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2 hover:-translate-y-0.5"
+            >
+              <Navigation className="w-5 h-5" />
+              {t('dashboard.dispatchRoute')}
             </button>
           </div>
         </div>
@@ -853,7 +1205,7 @@ Forecast:
               <div className="relative z-10 flex flex-col justify-between h-full">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-emerald-100 text-sm font-bold uppercase tracking-wider">Total Fleet</p>
+                    <p className="text-emerald-100 text-sm font-bold uppercase tracking-wider">{t('dashboard.totalFleet')}</p>
                     <h3 className="mt-2 text-4xl font-extrabold">{units.length}</h3>
                   </div>
                   <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
@@ -862,7 +1214,7 @@ Forecast:
                 </div>
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-sm text-emerald-50 mb-1">
-                    <span>Utilization</span>
+                    <span>{t('dashboard.utilization')}</span>
                     <span>85%</span>
                   </div>
                   <div className="h-2 w-full bg-black/20 rounded-full overflow-hidden">
@@ -878,9 +1230,9 @@ Forecast:
               <div className="relative z-10 flex flex-col justify-between h-full">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-indigo-100 text-sm font-bold uppercase tracking-wider">Active Routes</p>
+                    <p className="text-indigo-100 text-sm font-bold uppercase tracking-wider">{t('dashboard.activeRoutes')}</p>
                     <h3 className="mt-2 text-4xl font-extrabold">{routes.filter((r) => r.status === 'active').length}</h3>
-                    <p className="mt-1 text-sm text-indigo-200">On the road now</p>
+                    <p className="mt-1 text-sm text-indigo-200">{t('dashboard.onRoad')}</p>
                   </div>
                   <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl">
                     <Navigation className="w-6 h-6 text-white" />
@@ -894,23 +1246,30 @@ Forecast:
               </div>
             </div>
 
-            {/* Revenue Card - Premium */}
+            {/* Revenue Card - Real Data */}
             <div className="relative overflow-hidden rounded-3xl bg-white p-6 shadow-xl shadow-gray-200/50 border border-gray-100 group hover:scale-[1.02] transition-transform duration-300">
               <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-amber-500/5 blur-3xl"></div>
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 text-sm font-bold uppercase tracking-wider">Daily Revenue</h3>
+                  <h3 className="text-gray-500 text-sm font-bold uppercase tracking-wider">{t('dashboard.dailyRevenue')}</h3>
                   <div className="p-3 bg-amber-50 rounded-xl">
                     <DollarSign className="w-6 h-6 text-amber-500" />
                   </div>
                 </div>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-4xl font-extrabold text-gray-900">58k</span>
-                  <span className="text-lg font-medium text-gray-500">KES</span>
+                  <span className="text-4xl font-extrabold text-gray-900">
+                    {dailyRevenue.today > 0 ? formatCurrency(dailyRevenue.today).replace(/[A-Z$€£]+\s?/, '') : '0'}
+                  </span>
+                  <span className="text-lg font-medium text-gray-500">{settings.currency}</span>
                 </div>
                 <div className="mt-4 flex items-center text-sm">
-                  <span className="text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded mr-2">+12.5%</span>
-                  <span className="text-gray-400">vs yesterday</span>
+                  <span className={`font-bold px-2 py-0.5 rounded mr-2 ${dailyRevenue.change >= 0
+                    ? 'text-green-600 bg-green-50'
+                    : 'text-red-600 bg-red-50'
+                    }`}>
+                    {dailyRevenue.change >= 0 ? '+' : ''}{dailyRevenue.change.toFixed(1)}%
+                  </span>
+                  <span className="text-gray-400">{t('dashboard.revenue.vsYesterday')}</span>
                 </div>
               </div>
             </div>
@@ -920,36 +1279,79 @@ Forecast:
               <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-red-500/5 blur-3xl"></div>
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 text-sm font-bold uppercase tracking-wider">Maintenance</h3>
+                  <h3 className="text-gray-500 text-sm font-bold uppercase tracking-wider">{t('dashboard.maintenanceCard.title')}</h3>
                   <div className="p-3 bg-red-50 rounded-xl">
                     <Wrench className="w-6 h-6 text-red-500" />
                   </div>
                 </div>
                 <div className="flex items-baseline gap-2">
                   <span className="text-4xl font-extrabold text-gray-900">{units.filter((u) => u.status === 'maintenance').length}</span>
-                  <span className="text-lg font-medium text-gray-500">Units</span>
+                  <span className="text-lg font-medium text-gray-500">{t('dashboard.maintenanceCard.units')}</span>
                 </div>
                 <div className="mt-4">
                   {units.filter((u) => u.status === 'maintenance').length > 0 ? (
                     <button onClick={() => setActiveTab('maintenance')} className="text-sm font-semibold text-red-600 hover:text-red-700 hover:underline flex items-center">
-                      View Critical Issues <ChevronRight className="w-3 h-3 ml-1" />
+                      {t('dashboard.maintenanceCard.viewCritical')} <ChevronRight className="w-3 h-3 ml-1" />
                     </button>
-                  ) : <span className="text-sm font-medium text-green-600 flex items-center"><CheckCircle className="w-4 h-4 mr-1" /> All systems operational</span>}
+                  ) : <span className="text-sm font-medium text-green-600 flex items-center"><CheckCircle className="w-4 h-4 mr-1" /> {t('dashboard.maintenanceCard.allOperational')}</span>}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Recent Activity / Chart Placeholder */}
-          <div className="bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 min-h-[250px] relative overflow-hidden">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-900">Live Fleet Activity</h3>
-              <button className="text-blue-600 hover:text-blue-700 text-sm font-semibold">View Full Map</button>
+          {/* Live Fleet Map - Redesigned */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-5">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">{t('dashboard.liveFleet.title')}</h3>
+                <p className="text-sm text-gray-500 mt-1">Real-time unit and technician tracking</p>
+              </div>
+              <button
+                onClick={() => setActiveTab('fleet')}
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+              >
+                {t('dashboard.liveFleet.viewFull')}
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
 
-            {/* Live Map Component */}
-            <div className="h-[300px] w-full rounded-2xl overflow-hidden border border-gray-100 shadow-inner bg-slate-50 relative z-0">
-              <LiveFleetMap />
+            {/* Map Container */}
+            <div className="h-[400px] w-full rounded-xl overflow-hidden border-2 border-gray-200 shadow-lg bg-slate-50 relative">
+              <LiveFleetMap units={units} trucks={teamMembers} onRefresh={fetchAll} />
+            </div>
+
+            {/* Map Legend with Counts */}
+            <div className="mt-4 flex items-center justify-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-green-500 border-2 border-white shadow"></div>
+                <span className="text-gray-600">
+                  Active: <span className="font-semibold text-gray-900">{units.filter(u => u.status === 'active').length}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-yellow-500 border-2 border-white shadow"></div>
+                <span className="text-gray-600">
+                  Maintenance: <span className="font-semibold text-gray-900">{units.filter(u => u.status === 'maintenance').length}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-gray-400 border-2 border-white shadow"></div>
+                <span className="text-gray-600">
+                  Offline: <span className="font-semibold text-gray-900">{units.filter(u => u.status === 'offline').length}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow"></div>
+                <span className="text-gray-600">
+                  Technicians: <span className="font-semibold text-gray-900">{teamMembers.filter(t => {
+                    const hasLocation = t.lastLat && t.lastLng;
+                    const role = t.role?.toLowerCase() || '';
+                    const isTechOrDriver = role.includes('technician') || role.includes('driver') || role.includes('field');
+                    return hasLocation && isTechOrDriver;
+                  }).length}</span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -964,8 +1366,8 @@ Forecast:
           <div className="relative z-10 flex flex-col h-full">
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-700">
               <div>
-                <h3 className="text-lg font-bold tracking-tight">Cortex AI</h3>
-                <p className="text-xs text-slate-400 mt-1 font-mono">Analysis Mode: ACTIVE</p>
+                <h3 className="text-lg font-bold tracking-tight">{t('cortex.title')}</h3>
+                <p className="text-xs text-slate-400 mt-1 font-mono">{t('cortex.mode')}</p>
               </div>
               <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]"></div>
             </div>
@@ -975,37 +1377,36 @@ Forecast:
               <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
                 <div className="flex items-center gap-2 mb-2">
                   <TrendingUp className="w-4 h-4 text-blue-400" />
-                  <h4 className="text-sm font-semibold text-slate-200">Demand Forecast</h4>
+                  <h4 className="text-sm font-semibold text-slate-200">{t('cortex.forecast.title')}</h4>
                 </div>
                 <p className="text-2xl font-bold">{forecast ? forecast.peakDay : '---'}</p>
-                <p className="text-xs text-slate-400 mt-1">Expected peak traffic day</p>
+                <p className="text-xs text-slate-400 mt-1">{t('cortex.forecast.desc')}</p>
               </div>
 
               {/* Risks Block */}
               <div>
-                <p className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Risk Assessment</p>
+                <p className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">{t('cortex.risk.title')}</p>
                 <ul className="space-y-3">
                   {topRisks.length === 0 ? (
-                    <li className="text-slate-500 text-sm italic">No critical anomalies.</li>
+                    <li className="text-slate-500 text-sm italic">{t('cortex.risk.empty')}</li>
                   ) : (
                     topRisks.map((item) => (
                       <li key={item.unit.id} className="flex items-center justify-between p-3 bg-slate-800 rounded-lg border-l-2 border-red-500">
                         <span className="font-mono text-sm text-slate-300">{item.unit.serialNo}</span>
-                        <span className="text-xs font-bold text-red-400">{`${item.risk}% RISK`}</span>
+                        <span className="text-xs font-bold text-red-400">{`${item.risk}% ${t('cortex.risk.label')}`}</span>
                       </li>
                     ))
                   )}
                 </ul>
               </div>
 
-              {/* Alerts Block */}
               <div>
-                <p className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Live Alerts</p>
+                <p className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">{t('dashboard.liveAlerts')}</p>
                 <div className="space-y-3">
                   {aiAlerts.length === 0 ? (
                     <div className="flex items-center text-sm text-green-400 bg-green-900/20 p-3 rounded-lg border border-green-900/30">
                       <div className="w-1.5 h-1.5 bg-green-400 rounded-full mr-2"></div>
-                      Normal operations
+                      {t('dashboard.alerts.normalOperations')}
                     </div>
                   ) : (
                     aiAlerts.map((alert, idx) => (
@@ -1026,7 +1427,7 @@ Forecast:
                 className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-wait text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/50 flex items-center justify-center gap-2"
               >
                 {cortexReportLoading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
-                {cortexReportLoading ? 'Generating Analysis...' : 'Generate Full Report'}
+                {cortexReportLoading ? t('dashboard.generating') : t('dashboard.generateReport')}
               </button>
             </div>
           </div>
@@ -1035,17 +1436,17 @@ Forecast:
 
       {/* Urgent Alerts */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Urgent Alerts</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('dashboard.urgentAlerts')}</h3>
         <div className="space-y-4">
-          {units.filter((u) => u.fillLevel > 80 || u.batteryLevel < 20).length === 0 && <p className="text-sm text-gray-500">No urgent alerts</p>}
+          {units.filter((u) => u.fillLevel > 80 || u.batteryLevel < 20).length === 0 && <p className="text-sm text-gray-500">{t('dashboard.alerts.none')}</p>}
           {units.map((u) => (
             <div key={u.id}>
               {u.fillLevel > 80 && (
                 <div className="flex items-center p-4 bg-red-50 rounded-lg mb-3">
                   <AlertTriangle className="w-5 h-5 text-red-600 mr-3" />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-red-800">{`Unit ${u.serialNo} requires immediate servicing`}</p>
-                    <p className="text-xs text-red-600">{`Fill level: ${u.fillLevel}% | Location: ${u.location}`}</p>
+                    <p className="text-sm font-medium text-red-800">{`Unit ${u.serialNo} ${t('dashboard.alerts.requiresServicing')}`}</p>
+                    <p className="text-xs text-red-600">{`${t('dashboard.alerts.fillLevel')}: ${u.fillLevel}% | ${t('dashboard.alerts.location')}: ${u.location}`}</p>
                   </div>
                   <button
                     className="text-red-600 hover:text-red-800 text-sm font-medium"
@@ -1057,7 +1458,7 @@ Forecast:
                       setUnitModalOpen(false);
                     }}
                   >
-                    Assign Route
+                    {t('dashboard.alerts.assignRoute')}
                   </button>
                 </div>
               )}
@@ -1065,8 +1466,8 @@ Forecast:
                 <div className="flex items-center p-4 bg-yellow-50 rounded-lg">
                   <Battery className="w-5 h-5 text-yellow-600 mr-3" />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-yellow-800">{`Low battery alert for ${u.serialNo}`}</p>
-                    <p className="text-xs text-yellow-600">{`Battery level: ${u.batteryLevel}% | Last seen: ${u.lastSeen}`}</p>
+                    <p className="text-sm font-medium text-yellow-800">{`${t('dashboard.alerts.lowBattery')} ${u.serialNo}`}</p>
+                    <p className="text-xs text-yellow-600">{`${t('dashboard.alerts.batteryLevel')}: ${u.batteryLevel}% | ${t('dashboard.alerts.lastSeen')}: ${u.lastSeen}`}</p>
                   </div>
                   <button
                     className="text-yellow-600 hover:text-yellow-800 text-sm font-medium"
@@ -1076,7 +1477,7 @@ Forecast:
                       openUnitModal(u);
                     }}
                   >
-                    Schedule Maintenance
+                    {t('dashboard.alerts.scheduleMaintenance')}
                   </button>
                 </div>
               )}
@@ -1085,27 +1486,104 @@ Forecast:
         </div>
       </div>
 
-      {/* Fleet Status table (compact) */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Fleet Status</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Fleet Status - Redesigned with Better Spacing */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">{t('dashboard.fleetStatus')}</h3>
+            <p className="text-sm text-gray-500 mt-1">Real-time unit monitoring</p>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              <span>{units.filter(u => u.status === 'active').length} Active</span>
+            </div>
+            <div className="flex items-center gap-1.5 ml-4">
+              <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+              <span>{units.filter(u => u.status === 'maintenance').length} Maintenance</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {units.map((unit) => (
             <div
               key={unit.id}
-              className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+              className="group relative border-2 border-gray-100 hover:border-blue-200 rounded-xl p-5 hover:shadow-md transition-all cursor-pointer bg-gradient-to-br from-white to-gray-50/50"
               role="button"
               tabIndex={0}
               onClick={() => openUnitModal(unit)}
               onKeyDown={() => openUnitModal(unit)}
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-gray-900">{unit.serialNo}</span>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(unit.status)}`}>{unit.status}</span>
+              {/* Status Indicator */}
+              <div className="absolute top-4 right-4">
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusColor(unit.status)}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${unit.status === 'active' ? 'bg-green-600' :
+                    unit.status === 'maintenance' ? 'bg-yellow-600' :
+                      'bg-gray-600'
+                    }`}></div>
+                  {unit.status === 'active' ? t('map.status.active') :
+                    unit.status === 'maintenance' ? t('dashboard.maintenanceTab') :
+                      unit.status === 'offline' ? t('map.status.offline') :
+                        unit.status}
+                </span>
               </div>
-              <div className="text-sm text-gray-600">Location: {unit.location}</div>
-              <div className="mt-2 flex items-center justify-between">
-                <div className="text-xs">Fill: {unit.fillLevel}%</div>
-                <div className="text-xs">Battery: {unit.batteryLevel}%</div>
+
+              {/* Unit Info */}
+              <div className="mb-4">
+                <h4 className="text-lg font-bold text-gray-900 mb-1">{unit.serialNo}</h4>
+                <p className="text-sm text-gray-600 flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5" />
+                  {unit.location}
+                </p>
+              </div>
+
+              {/* Metrics */}
+              <div className="space-y-3">
+                {/* Fill Level */}
+                <div>
+                  <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
+                    <span className="font-medium">{t('dashboard.fleet.fill')}</span>
+                    <span className="font-semibold">{unit.fillLevel}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${unit.fillLevel > 80 ? 'bg-red-500' :
+                        unit.fillLevel > 50 ? 'bg-yellow-500' :
+                          'bg-green-500'
+                        }`}
+                      style={{ width: `${unit.fillLevel}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Battery Level */}
+                <div>
+                  <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
+                    <span className="font-medium flex items-center gap-1">
+                      <Battery className="w-3.5 h-3.5" />
+                      {t('dashboard.fleet.battery')}
+                    </span>
+                    <span className="font-semibold">{unit.batteryLevel}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${unit.batteryLevel < 20 ? 'bg-red-500' :
+                        unit.batteryLevel < 50 ? 'bg-yellow-500' :
+                          'bg-blue-500'
+                        }`}
+                      style={{ width: `${unit.batteryLevel}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Hover Action Hint */}
+              <div className="mt-4 pt-3 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity">
+                <p className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                  <Eye className="w-3.5 h-3.5" />
+                  Click to view details
+                </p>
               </div>
             </div>
           ))}
@@ -1173,19 +1651,84 @@ Forecast:
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    className="px-3 py-2 text-sm border rounded"
+                    className="px-3 py-2 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 transition-colors"
                     onClick={() => {
-                      openCreateRoute();
-                      if (activeUnitId) setFormUnitId(activeUnitId);
+                      if (!activeUnitId) return;
+                      setFormUnitId(activeUnitId);
                       setUnitModalOpen(false);
+                      setActiveTab('routes');
                     }}
                   >
                     Assign Route
                   </button>
-                  <button type="button" className="px-3 py-2 text-sm border rounded" onClick={() => setFormUnitStatus('maintenance')}>
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-sm border border-yellow-600 text-yellow-600 rounded hover:bg-yellow-50 transition-colors"
+                    onClick={async () => {
+                      if (!activeUnitId) return;
+                      try {
+                        const currentUnit = units.find(u => u.id === activeUnitId);
+                        if (!currentUnit) return;
+
+                        const resp = await apiFetch(`/api/units/${activeUnitId}`, {
+                          method: 'PUT',
+                          data: {
+                            status: 'maintenance',
+                            location: currentUnit.location,
+                            fillLevel: currentUnit.fillLevel,
+                            batteryLevel: currentUnit.batteryLevel,
+                          },
+                        });
+                        if (resp.ok) {
+                          await fetchAll();
+                          alert('✅ Unit marked for maintenance');
+                          setUnitModalOpen(false);
+                        } else {
+                          const errorData = await resp.json().catch(() => ({}));
+                          console.error('API Error:', errorData);
+                          alert('❌ Failed to update unit status: ' + (errorData.error || 'Unknown error'));
+                        }
+                      } catch (err) {
+                        console.error('Failed to mark maintenance:', err);
+                        alert('❌ Error updating unit');
+                      }
+                    }}
+                  >
                     Mark Maintenance
                   </button>
-                  <button type="button" className="px-3 py-2 text-sm border rounded" onClick={() => setFormUnitStatus('active')}>
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-sm border border-green-600 text-green-600 rounded hover:bg-green-50 transition-colors"
+                    onClick={async () => {
+                      if (!activeUnitId) return;
+                      try {
+                        const currentUnit = units.find(u => u.id === activeUnitId);
+                        if (!currentUnit) return;
+
+                        const resp = await apiFetch(`/api/units/${activeUnitId}`, {
+                          method: 'PUT',
+                          data: {
+                            status: 'active',
+                            location: currentUnit.location,
+                            fillLevel: currentUnit.fillLevel,
+                            batteryLevel: currentUnit.batteryLevel,
+                          },
+                        });
+                        if (resp.ok) {
+                          await fetchAll();
+                          alert('✅ Unit marked as active');
+                          setUnitModalOpen(false);
+                        } else {
+                          const errorData = await resp.json().catch(() => ({}));
+                          console.error('API Error:', errorData);
+                          alert('❌ Failed to update unit status: ' + (errorData.error || 'Unknown error'));
+                        }
+                      } catch (err) {
+                        console.error('Failed to mark active:', err);
+                        alert('❌ Error updating unit');
+                      }
+                    }}
+                  >
                     Mark Active
                   </button>
                 </div>
@@ -1220,126 +1763,231 @@ Forecast:
     </div >
   );
 
-  const renderBookings = () => (
-    <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Bookings Management</h3>
-          <div className="flex items-center space-x-2">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search bookings..."
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+  const renderBookings = () => {
+    const { bookings: contextBookings } = useBookings();
+    const totalBookings = contextBookings?.length || 0;
+    const confirmedBookings = contextBookings?.filter(b => b.status === 'confirmed').length || 0;
+    const pendingBookings = contextBookings?.filter(b => b.status === 'pending').length || 0;
+    const paidBookings = contextBookings?.filter(b => b.payment?.status === 'paid').length || 0;
+
+    return (
+      <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+        {/* Header Section */}
+        <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-green-50 to-emerald-50">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">{t('bookings.title') || 'Bookings Management'}</h3>
+                <p className="text-sm text-gray-600 mt-1">{t('bookings.subtitle')}</p>
+              </div>
+              <button
+                type="button"
+                className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-md transition-all flex items-center gap-2 font-semibold"
+                onClick={openCreateBooking}
+              >
+                <Plus className="w-4 h-4" />
+                {t('bookings.new') || 'New Booking'}
+              </button>
             </div>
-            <button type="button" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={openCreateBooking}>
-              <Plus className="w-4 h-4 mr-2 inline" />
-              New Booking
-            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-900">{totalBookings}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('bookings.stats.total')}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-green-600">{confirmedBookings}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('bookings.stats.confirmed')}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-yellow-600">{pendingBookings}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('bookings.stats.pending')}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-blue-600">{paidBookings}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('bookings.stats.paid')}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Smart Booking AI Section */}
+          <div className="p-6 border-b border-gray-100 bg-gradient-to-br from-purple-50 to-indigo-50">
+            <div className="flex items-center gap-2 mb-4">
+              <Globe className="w-5 h-5 text-purple-600" />
+              <h4 className="text-lg font-bold text-gray-900">{t('bookings.smart.title') || 'Smart Booking AI'}</h4>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{t('bookings.smart.date') || 'Date'}</label>
+                <input
+                  type="date"
+                  className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={sbDate}
+                  onChange={(e) => setSbDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{t('bookings.smart.location') || 'Location'}</label>
+                <input
+                  type="text"
+                  className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={sbLocation}
+                  onChange={(e) => setSbLocation(e.target.value)}
+                  placeholder="e.g. Nairobi"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{t('bookings.smart.units') || 'Units'}</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={sbUnits}
+                  onChange={(e) => setSbUnits(Number(e.target.value))}
+                  placeholder="1"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{t('bookings.smart.duration') || 'Duration (days)'}</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={sbDuration}
+                  onChange={(e) => setSbDuration(Number(e.target.value))}
+                  placeholder="1"
+                />
+              </div>
+              <div className="flex flex-col">
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{t('bookings.smart.capacity') || 'Capacity'}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                    value={sbCapacity}
+                    onChange={(e) => setSbCapacity(Number(e.target.value))}
+                    placeholder="80"
+                  />
+                  <button
+                    type="button"
+                    onClick={smartSuggest}
+                    className="px-4 py-2 text-sm bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold whitespace-nowrap shadow-md transition-all"
+                    disabled={sbLoading}
+                  >
+                    {sbLoading ? '...' : t('bookings.smart.suggestButton') || 'Suggest'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {sbError && <div className="mt-4 text-red-600 text-sm bg-red-50 p-3 rounded-xl border border-red-200">{sbError}</div>}
+
+            {(sbSuggestion || (sbAlternatives && sbAlternatives.length > 0)) && (
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {sbSuggestion && (
+                  <div className="bg-white border-2 border-purple-200 rounded-xl p-4">
+                    <p className="text-xs text-purple-600 font-bold uppercase tracking-wider mb-1">{t('bookings.smart.suggested') || 'Suggested Date'}</p>
+                    <p className="text-gray-900 font-bold text-lg">{sbSuggestion.date}</p>
+                    <p className="text-xs text-gray-600 mt-1">{t('bookings.smart.utilization') || 'Utilization'}: {Math.round((sbSuggestion.utilization || 0) * 100)}%</p>
+                    <button
+                      type="button"
+                      className="mt-3 px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold transition-all"
+                      onClick={() => {
+                        if (sbSuggestion?.date) {
+                          openCreateBooking();
+                          setFormDate(sbSuggestion.date);
+                        }
+                      }}
+                    >
+                      {t('bookings.smart.apply') || 'Apply'}
+                    </button>
+                  </div>
+                )}
+                {sbAlternatives && sbAlternatives.length > 0 && (
+                  <div className="bg-white border-2 border-purple-200 rounded-xl p-4">
+                    <p className="text-xs text-purple-600 font-bold uppercase tracking-wider mb-2">{t('bookings.smart.alternatives') || 'Alternative Dates'}</p>
+                    <ul className="text-sm space-y-2">
+                      {sbAlternatives.map((alt) => (
+                        <li key={alt.date} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                          <span className="text-gray-700">
+                            {alt.date} • <span className="text-purple-600 font-semibold">{Math.round((alt.utilization || 0) * 100)}%</span>
+                          </span>
+                          <button
+                            type="button"
+                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 font-semibold transition-all"
+                            onClick={() => {
+                              openCreateBooking();
+                              setFormDate(alt.date);
+                            }}
+                          >
+                            {t('bookings.smart.use') || 'Use'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {bookings
-                .filter((b) => b.customer.toLowerCase().includes(searchTerm.toLowerCase()) || b.unit.toLowerCase().includes(searchTerm.toLowerCase()))
-                .map((booking) => (
-                  <tr key={booking.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{booking.customer}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {booking.technicianId
-                        ? (teamMembers.find(t => t.id === booking.technicianId)?.name || 'Unknown')
-                        : <span className="text-gray-400 italic">Unassigned</span>}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.unit}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.date}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.duration}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">KSh {booking.amount.toLocaleString()}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(booking.status)}`}>{booking.status}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(booking.paymentStatus)}`}>{booking.paymentStatus}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                      <button className="text-blue-600 hover:text-blue-900" type="button" onClick={() => openEditBooking(booking)}>
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button className="text-green-600 hover:text-green-900" type="button" onClick={() => openEditBooking(booking)}>
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button className="text-red-600 hover:text-red-900" type="button" onClick={() => deleteBooking(booking.id)}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
 
-        {/* Booking modal */}
+        {/* Booking List */}
+        <BookingList />
+
+        {/* Booking Modal */}
         {bookingModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-              <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
-                <div>
-                  <h4 className="text-xl font-bold text-gray-900">{editingBookingId ? 'Edit Booking' : 'New Booking'}</h4>
-                  <p className="text-sm text-gray-500 mt-1">Manage reservation details and payment status</p>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-gradient-to-r from-green-600 to-emerald-600 text-white p-6 rounded-t-3xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-2xl font-bold">{editingBookingId ? t('bookings.modal.title.edit') : t('bookings.modal.title.new')}</h4>
+                    <p className="text-green-100 text-sm mt-1">{t('bookings.modal.subtitle') || 'Create or update booking details'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBookingModalOpen(false)}
+                    className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-                <button
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors"
-                  type="button"
-                  onClick={() => setBookingModalOpen(false)}
-                >
-                  ×
-                </button>
               </div>
 
-              <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+              <div className="p-8 space-y-6">
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Customer Name</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.customerName') || 'Customer Name'}</label>
                   <input
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                     placeholder="e.g. John Doe"
                     value={formCustomer}
                     onChange={(e) => setFormCustomer(e.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Assign Technician</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.assignTech') || 'Assign Technician'}</label>
                   <select
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                     value={formBookingTechId}
                     onChange={(e) => setFormBookingTechId(e.target.value)}
                   >
-                    <option value="">Unassigned</option>
+                    <option value="">{t('bookings.modal.unassigned') || 'Unassigned'}</option>
                     {teamMembers.map((t) => (
                       <option key={t.id} value={t.id}>{t.name} ({t.id.slice(0, 4).toUpperCase()})</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Target Unit</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.targetUnit') || 'Target Unit'}</label>
                   <input
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                     placeholder="e.g. UNIT-001"
                     value={formUnit}
                     onChange={(e) => setFormUnit(e.target.value)}
@@ -1347,18 +1995,18 @@ Forecast:
                 </div>
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Start Date</label>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.startDate') || 'Start Date'}</label>
                     <input
                       type="date"
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                       value={formDate}
                       onChange={(e) => setFormDate(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Duration</label>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.duration') || 'Duration'}</label>
                     <input
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                       placeholder="e.g. 3 days"
                       value={formDuration}
                       onChange={(e) => setFormDuration(e.target.value)}
@@ -1366,11 +2014,11 @@ Forecast:
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amount (KES)</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.amount') || 'Amount'}</label>
                   <input
                     type="number"
                     min={0}
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                     placeholder="0.00"
                     value={formAmount}
                     onChange={(e) => setFormAmount(Number(e.target.value))}
@@ -1378,197 +2026,507 @@ Forecast:
                 </div>
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Booking Status</label>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.bookingStatus') || 'Booking Status'}</label>
                     <select
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                       value={formStatus}
                       onChange={(e) => setFormStatus(e.target.value as Booking['status'])}
                     >
-                      <option value="confirmed">Confirmed</option>
-                      <option value="pending">Pending</option>
-                      <option value="cancelled">Cancelled</option>
+                      <option value="confirmed">{t('bookings.status.confirmed') || 'Confirmed'}</option>
+                      <option value="pending">{t('bookings.status.pending') || 'Pending'}</option>
+                      <option value="cancelled">{t('bookings.status.cancelled') || 'Cancelled'}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Payment Status</label>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('bookings.modal.paymentStatus') || 'Payment Status'}</label>
                     <select
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
                       value={formPaymentStatus}
                       onChange={(e) => setFormPaymentStatus(e.target.value as Booking['paymentStatus'])}
                     >
-                      <option value="paid">Paid</option>
-                      <option value="pending">Pending</option>
-                      <option value="failed">Failed</option>
+                      <option value="paid">{t('bookings.paymentStatus.paid') || 'Paid'}</option>
+                      <option value="pending">{t('bookings.paymentStatus.pending') || 'Pending'}</option>
+                      <option value="failed">{t('bookings.paymentStatus.failed') || 'Failed'}</option>
                     </select>
                   </div>
                 </div>
               </div>
 
-              <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex items-center justify-end gap-3">
+              <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex gap-3 rounded-b-3xl">
                 <button
                   type="button"
-                  className="px-6 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all"
+                  className="flex-1 px-4 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all"
                   onClick={() => setBookingModalOpen(false)}
                 >
-                  Cancel
+                  {t('common.cancel') || 'Cancel'}
                 </button>
                 <button
                   type="button"
-                  className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl shadow-lg shadow-blue-500/30 hover:bg-blue-700 hover:-translate-y-0.5 transition-all"
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-green-500/30 transition-all hover:-translate-y-0.5"
                   onClick={saveBooking}
                 >
-                  {editingBookingId ? 'Update Booking' : 'Create Booking'}
+                  {t('common.save') || 'Save'}
                 </button>
               </div>
             </div>
           </div>
         )}
+      </div>
+    );
+  };
 
-        {/* Smart Booking */}
-        <div className="p-6 border-t space-y-4">
-          <h4 className="text-md font-semibold text-gray-900 mb-3">Smart Booking Intelligence</h4>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Target Date</label>
-              <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbDate} onChange={(e) => setSbDate(e.target.value)} />
+  const renderFleetMap = () => {
+    const selectedUnit = activeUnitId ? units.find(u => u.id === activeUnitId) : null;
+
+    const openUnitDetails = (unit: Unit) => {
+      setActiveUnitId(unit.id);
+      setFormUnitStatus(unit.status);
+      setFormUnitFill(unit.fillLevel);
+      setFormUnitBattery(unit.batteryLevel);
+      setFormUnitLocation(unit.location);
+      setUnitModalOpen(true);
+    };
+
+    const saveUnitChanges = async () => {
+      if (!activeUnitId) return;
+      try {
+        const resp = await apiFetch(`/api/units/${activeUnitId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: formUnitStatus,
+            fillLevel: formUnitFill,
+            batteryLevel: formUnitBattery,
+            location: formUnitLocation,
+          }),
+        });
+        if (resp.ok) {
+          await fetchAll();
+          setUnitModalOpen(false);
+          setActiveUnitId(null);
+        }
+      } catch (err) {
+        console.error('Failed to update unit:', err);
+        alert('Failed to update unit');
+      }
+    };
+
+    return (
+      <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+        <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">{t('dashboard.fleetMap')}</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {t('map.subtitle') || 'Real-time tracking of units and technicians'}
+                </p>
+              </div>
+              <button
+                onClick={fetchAll}
+                disabled={isRefreshing}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {isRefreshing ? (t('common.refreshing') || 'Refreshing...') : (t('common.refresh') || 'Refresh')}
+              </button>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Location</label>
-              <input type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbLocation} onChange={(e) => setSbLocation(e.target.value)} placeholder="e.g. Nairobi" />
+          </div>
+
+          {/* Main Content: Sidebar + Map */}
+          <div className="flex h-[700px]">
+            {/* Left Sidebar - Units and Technicians */}
+            <div className="w-80 border-r border-gray-200 overflow-y-auto bg-gray-50">
+              {/* Units Section */}
+              <div className="p-4">
+                <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-3 flex items-center">
+                  <Truck className="w-4 h-4 mr-2" />
+                  Units ({units.length})
+                </h4>
+                <div className="space-y-2">
+                  {units.map((unit) => {
+                    const openUnitDetails = (u: Unit) => {
+                      const details = `
+Unit Details
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Serial No: ${u.serialNo}
+Type: ${u.type}
+Location: ${u.location}
+Status: ${u.status}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Fill Level: ${u.fillLevel}%
+Battery Level: ${u.batteryLevel}%
+Last Seen: ${new Date(u.lastSeen).toLocaleString()}
+${u.temperature ? `\nTemperature: ${u.temperature}°C` : ''}
+${u.humidity ? `Humidity: ${u.humidity}%` : ''}
+${u.odorLevel ? `Odor Level: ${u.odorLevel}/100` : ''}
+${u.usageCount ? `Usage Count: ${u.usageCount}` : ''}
+${u.predictedFullDate ? `\nPredicted Full: ${new Date(u.predictedFullDate).toLocaleDateString()}` : ''}
+${u.riskScore ? `Risk Score: ${u.riskScore}/100` : ''}
+${u.recommendation ? `\nRecommendation: ${u.recommendation}` : ''}
+                      `;
+                      alert(details.trim());
+                    };
+
+                    return (
+                      <div
+                        key={unit.id}
+                        className="bg-white rounded-lg p-3 border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer"
+                        onClick={() => openUnitDetails(unit)}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <h5 className="font-bold text-sm text-gray-900">{unit.serialNo}</h5>
+                            <p className="text-xs text-gray-500">{unit.type}</p>
+                          </div>
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${getStatusColor(unit.status)}`}>
+                            {unit.status}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center text-xs text-gray-600">
+                            <MapPin className="w-3 h-3 mr-1" />
+                            {unit.location}
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">Fill: {unit.fillLevel}%</span>
+                            <span className="text-gray-600">Battery: {unit.batteryLevel}%</span>
+                          </div>
+                          {unit.temperature && (
+                            <div className="flex items-center text-xs text-gray-600">
+                              🌡️ {unit.temperature}°C • 💧 {unit.humidity}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Technicians Section */}
+              <div className="p-4 border-t border-gray-200">
+                <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-3 flex items-center">
+                  <User className="w-4 h-4 mr-2" />
+                  Technicians ({teamMembers.filter(m => m.status === 'active').length})
+                </h4>
+                <div className="space-y-2">
+                  {teamMembers.filter(m => m.status === 'active').map((tech) => (
+                    <div
+                      key={tech.id}
+                      className="bg-white rounded-lg p-3 border border-gray-200"
+                    >
+                      <div className="flex items-start justify-between mb-1">
+                        <h5 className="font-bold text-sm text-gray-900">{tech.name}</h5>
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800">
+                          {tech.role}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        <div className="flex items-center">
+                          <Phone className="w-3 h-3 mr-1" />
+                          {tech.phone}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Unit Count</label>
-              <input type="number" min={1} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbUnits} onChange={(e) => setSbUnits(Number(e.target.value))} placeholder="1" />
+
+            {/* Right Side - Map */}
+            <div className="flex-1 relative">
+              <LiveFleetMap
+                units={units}
+                trucks={teamMembers}
+                onRefresh={fetchAll}
+              />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Duration (Days)</label>
-              <input type="number" min={1} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbDuration} onChange={(e) => setSbDuration(Number(e.target.value))} placeholder="1" />
+          </div>
+
+          {/* Stats Footer */}
+          <div className="p-6 border-t border-gray-100 bg-gray-50/50">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-900">{units.length}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('map.stats.totalUnits') || 'Total Units'}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-green-600">{units.filter(u => u.status === 'active').length}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('map.stats.active') || 'Active'}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-yellow-600">{units.filter(u => u.status === 'maintenance').length}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('map.stats.maintenance') || 'Maintenance'}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-blue-600">{teamMembers.filter(m => m.status === 'active').length}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{t('map.stats.technicians') || 'Technicians'}</p>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Capacity / Day</label>
-              <div className="flex items-center gap-2">
-                <input type="number" min={0} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={sbCapacity} onChange={(e) => setSbCapacity(Number(e.target.value))} placeholder="80" />
-                <button type="button" onClick={smartSuggest} className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium whitespace-nowrap shadow-md" disabled={sbLoading}>
-                  {sbLoading ? '...' : 'Suggest'}
+          </div>
+        </div>
+
+        {/* Unit Details/Edit Modal */}
+        {unitModalOpen && selectedUnit && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 rounded-t-3xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-bold">{selectedUnit.serialNo}</h3>
+                    <p className="text-blue-100 text-sm mt-1">{selectedUnit.type}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setUnitModalOpen(false);
+                      setActiveUnitId(null);
+                    }}
+                    className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {/* IoT Sensor Data - Read Only */}
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-100">
+                  <h4 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                    <Wifi className="w-5 h-5 mr-2 text-blue-600" />
+                    {t('units.iot.title')}
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t('units.iot.temperature')}</div>
+                      <div className="text-2xl font-bold text-gray-900">{selectedUnit.temperature?.toFixed(1) || '--'}°C</div>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t('units.iot.humidity')}</div>
+                      <div className="text-2xl font-bold text-gray-900">{selectedUnit.humidity?.toFixed(1) || '--'}%</div>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t('units.iot.odorLevel')}</div>
+                      <div className="text-2xl font-bold text-gray-900">{selectedUnit.odorLevel || '--'}/100</div>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t('units.iot.usageCount')}</div>
+                      <div className="text-2xl font-bold text-gray-900">{selectedUnit.usageCount || 0}</div>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 shadow-sm col-span-2">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t('units.iot.lastService')}</div>
+                      <div className="text-lg font-bold text-gray-900">
+                        {selectedUnit.lastServiceDate ? new Date(selectedUnit.lastServiceDate).toLocaleDateString() : t('units.iot.notServiced')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editable Fields */}
+                <div className="space-y-4">
+                  <h4 className="text-lg font-bold text-gray-900 flex items-center">
+                    <Edit className="w-5 h-5 mr-2 text-gray-600" />
+                    {t('units.editable.title')}
+                  </h4>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('units.editable.location')}</label>
+                      <input
+                        type="text"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        value={formUnitLocation}
+                        onChange={(e) => setFormUnitLocation(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('units.editable.status')}</label>
+                      <select
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        value={formUnitStatus}
+                        onChange={(e) => setFormUnitStatus(e.target.value as UnitStatus)}
+                      >
+                        <option value="active">{t('units.status.active')}</option>
+                        <option value="maintenance">{t('units.status.maintenance')}</option>
+                        <option value="offline">{t('units.status.offline')}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('units.editable.fillLevel')}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        value={formUnitFill}
+                        onChange={(e) => setFormUnitFill(Number(e.target.value))}
+                      />
+                      <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${formUnitFill > 80 ? 'bg-red-500' : formUnitFill > 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                          style={{ width: `${formUnitFill}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('units.editable.batteryLevel')}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        value={formUnitBattery}
+                        onChange={(e) => setFormUnitBattery(Number(e.target.value))}
+                      />
+                      <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${formUnitBattery < 20 ? 'bg-red-500' : formUnitBattery < 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                          style={{ width: `${formUnitBattery}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Unit Info */}
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Unit ID:</span>
+                    <span className="font-mono text-gray-900">{selectedUnit.id.substring(0, 8)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Last Seen:</span>
+                    <span className="text-gray-900">{new Date(selectedUnit.lastSeen).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Coordinates:</span>
+                    <span className="font-mono text-gray-900">{selectedUnit.coordinates.join(', ')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex gap-3 rounded-b-3xl">
+                <button
+                  onClick={() => {
+                    setUnitModalOpen(false);
+                    setActiveUnitId(null);
+                  }}
+                  className="flex-1 px-4 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveUnitChanges}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:-translate-y-0.5"
+                >
+                  Save Changes
                 </button>
               </div>
             </div>
           </div>
-
-          {sbError && <div className="text-red-600 text-sm">{sbError}</div>}
-
-          {(sbSuggestion || (sbAlternatives && sbAlternatives.length > 0)) && (
-            <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {sbSuggestion && (
-                <div className="border rounded p-4">
-                  <p className="text-sm text-gray-500 mb-1">Suggested</p>
-                  <p className="text-gray-900 font-medium">{sbSuggestion.date}</p>
-                  <p className="text-xs text-gray-600">Utilization: {Math.round((sbSuggestion.utilization || 0) * 100)}%</p>
-                  <button
-                    type="button"
-                    className="mt-2 text-sm text-blue-600 hover:text-blue-800"
-                    onClick={() => {
-                      if (sbSuggestion?.date) {
-                        openCreateBooking();
-                        setFormDate(sbSuggestion.date);
-                      }
-                    }}
-                  >
-                    Apply to booking form
-                  </button>
-                </div>
-              )}
-              {sbAlternatives && sbAlternatives.length > 0 && (
-                <div className="border rounded p-4">
-                  <p className="text-sm text-gray-500 mb-1">Alternatives</p>
-                  <ul className="text-sm list-disc ml-4 space-y-1">
-                    {sbAlternatives.map((alt) => (
-                      <li key={alt.date} className="flex items-center justify-between">
-                        <span>
-                          {alt.date} • {Math.round((alt.utilization || 0) * 100)}%
-                        </span>
-                        <button
-                          type="button"
-                          className="text-blue-600 hover:text-blue-800"
-                          onClick={() => {
-                            openCreateBooking();
-                            setFormDate(alt.date);
-                          }}
-                        >
-                          Use
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderRoutes = () => (
     <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden p-0">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Routes</h3>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={optimizeRoutes} className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700">
-              <Navigation className="w-4 h-4 mr-2 inline" /> Optimize Routes
-            </button>
-            <button type="button" onClick={openCreateRoute} className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2 inline" /> New Route
-            </button>
+      <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-indigo-50">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-2xl font-bold text-gray-900">{t('routes.title') || 'Routes Management'}</h3>
+              <p className="text-sm text-gray-600 mt-1">Manage and optimize delivery routes</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={optimizeRoutes}
+                className="px-4 py-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-all shadow-md flex items-center gap-2 font-semibold"
+              >
+                <TrendingUp className="w-4 h-4" />
+                {t('routes.optimize') || 'Optimize'}
+              </button>
+              <button
+                type="button"
+                onClick={openCreateRoute}
+                className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 font-semibold"
+              >
+                <Plus className="w-4 h-4" />
+                {t('routes.new') || 'New Route'}
+              </button>
+            </div>
           </div>
         </div>
 
+        {/* Optimization Result */}
         {optResult && (
-          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
-            <div className="flex items-start justify-between">
+          <div className="m-6 bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-2xl p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1">
+                <h4 className="text-lg font-bold text-purple-900 flex items-center mb-2">
+                  <TrendingUp className="w-5 h-5 mr-2" />
+                  {t('routes.optimizationComplete') || 'Route Optimization Complete'}
+                </h4>
+                <p className="text-sm text-purple-700">
+                  {t('routes.savings') || 'Savings'}: <span className="font-bold">{optResult.savings?.distance ?? '-'} km</span> ({optResult.savings?.fuel ?? '-'})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={applyOptimizedOrder}
+                className="px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-all shadow-md font-semibold"
+              >
+                {t('routes.applyOrder') || 'Apply Order'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Depot Location</label>
-                <select className="w-full border border-gray-300 rounded-md px-3 py-2" value={selectedDepot} onChange={(e) => setSelectedDepot(e.target.value)}>
+                <label className="block text-xs font-bold text-purple-700 uppercase tracking-wider mb-2">{t('routes.depot') || 'Depot'}</label>
+                <select
+                  className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={selectedDepot}
+                  onChange={(e) => setSelectedDepot(e.target.value)}
+                >
                   {Object.keys(depots).map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
+                    <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
-                <select className="w-full border border-gray-300 rounded-md px-3 py-2">
-                  <option>Fill Level Priority</option>
-                  <option>Distance Priority</option>
-                  <option>Customer Priority</option>
+                <label className="block text-xs font-bold text-purple-700 uppercase tracking-wider mb-2">{t('routes.priority') || 'Priority'}</label>
+                <select className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                  <option>{t('routes.opt.priority.fillLevel') || 'Fill Level'}</option>
+                  <option>{t('routes.opt.priority.distance') || 'Distance'}</option>
+                  <option>{t('routes.opt.priority.customer') || 'Customer'}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Time Window</label>
-                <select className="w-full border border-gray-300 rounded-md px-3 py-2">
-                  <option>Morning (6AM - 12PM)</option>
-                  <option>Afternoon (12PM - 6PM)</option>
-                  <option>Full Day (6AM - 6PM)</option>
+                <label className="block text-xs font-bold text-purple-700 uppercase tracking-wider mb-2">{t('routes.timeWindow') || 'Time Window'}</label>
+                <select className="w-full border-2 border-purple-200 bg-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                  <option>{t('routes.opt.time.morning') || 'Morning'}</option>
+                  <option>{t('routes.opt.time.afternoon') || 'Afternoon'}</option>
+                  <option>{t('routes.opt.time.fullDay') || 'Full Day'}</option>
                 </select>
-                <h4 className="text-purple-900 font-semibold flex items-center mt-2">
-                  <TrendingUp className="w-4 h-4 mr-2" /> AI Optimization Complete
-                </h4>
-                <p className="text-sm text-purple-700 mt-1">Estimated savings: {optResult.savings?.distance ?? '-'} km ({optResult.savings?.fuel ?? '-'})</p>
-              </div>
-              <div className="flex flex-col gap-2">
-                <button type="button" onClick={applyOptimizedOrder} className="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700">
-                  Apply Order
-                </button>
               </div>
             </div>
+
             {optResult.orderedStops && (
-              <div className="mt-4 border rounded p-4">
-                <p className="text-sm text-gray-700 mb-2">
-                  Total Distance: <span className="font-medium">{optResult.totalDistanceKm ?? '-'} km</span>
+              <div className="bg-white rounded-xl p-4 border border-purple-200">
+                <p className="text-sm font-bold text-gray-700 mb-2">
+                  {t('routes.totalDistance') || 'Total Distance'}: <span className="text-purple-600">{optResult.totalDistanceKm ?? '-'} km</span>
                 </p>
-                <ol className="list-decimal ml-5 space-y-1 text-sm">
+                <ol className="list-decimal ml-5 space-y-1 text-sm text-gray-600">
                   {optResult.orderedStops.map((s, idx) => (
                     <li key={idx}>
                       {s.serialNo || s.id} • Leg {s.legDistanceKm ?? '-'} km
@@ -1580,229 +2538,244 @@ Forecast:
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Technician</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tech ID</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ETA</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {routes.map((route) => (
-                <tr key={route.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold mr-3">
-                        {route.technician.charAt(0)}
+        {/* Routes Grid */}
+        <div className="p-6">
+          {routes.length === 0 ? (
+            <div className="text-center py-12">
+              <Navigation className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">{t('routes.empty.title')}</h3>
+              <p className="text-gray-500 mb-4">{t('routes.empty.subtitle')}</p>
+              <button
+                onClick={openCreateRoute}
+                className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md font-semibold"
+              >
+                {t('routes.empty.create')}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {routes.map((route) => {
+                const tech = teamMemberMap.get(route.technicianId || '');
+                const priorityColors = {
+                  high: 'bg-red-100 text-red-800 border-red-200',
+                  medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                  low: 'bg-green-100 text-green-800 border-green-200',
+                };
+                const statusColors = {
+                  active: 'bg-green-500',
+                  pending: 'bg-yellow-500',
+                  completed: 'bg-gray-500',
+                };
+
+                return (
+                  <div
+                    key={route.id}
+                    className="bg-white rounded-2xl border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all p-5"
+                  >
+                    {/* Header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-md">
+                          {route.technician.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-gray-900">{route.technician}</h4>
+                          <p className="text-xs text-gray-500 font-mono">
+                            {tech?.id.slice(0, 8).toUpperCase() || 'N/A'}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-sm font-medium text-gray-900">{route.technician}</div>
+                      <div className={`w-3 h-3 rounded-full ${statusColors[route.status]} shadow-md`} />
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-                    {(teamMembers.find(t => t.name === route.technician)?.id || '-').slice(0, 4).toUpperCase()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${route.status === 'active' ? 'bg-green-100 text-green-800' : route.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {route.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{route.priority}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{route.estimatedTime}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button type="button" onClick={() => openEditRoute(route)} className="text-blue-600 hover:text-blue-900 mr-3">
-                      Edit
-                    </button>
-                    <button type="button" onClick={() => deleteRoute(route.id)} className="text-red-600 hover:text-red-900">
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+                    {/* Info */}
+                    <div className="space-y-3 mb-4">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">{t('routes.card.status')}:</span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${getStatusColor(route.status)}`}>
+                          {route.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">{t('routes.card.priority')}:</span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${priorityColors[route.priority]}`}>
+                          {route.priority}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">{t('routes.card.units')}:</span>
+                        <span className="font-bold text-gray-900">{route.units}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">{t('routes.card.eta')}:</span>
+                        <span className="font-bold text-gray-900">{route.estimatedTime}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-4 border-t border-gray-100">
+                      <button
+                        type="button"
+                        onClick={() => openEditRoute(route)}
+                        className="flex-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all font-semibold text-sm flex items-center justify-center gap-2"
+                      >
+                        <Edit className="w-4 h-4" />
+                        {t('common.edit')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteRoute(route.id)}
+                        className="flex-1 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all font-semibold text-sm flex items-center justify-center gap-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        {t('common.delete')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Route modal */}
-        {/* Route modal */}
-        {routeModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-              <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
+        {/* Stats Footer */}
+        <div className="p-6 border-t border-gray-100 bg-gray-50/50">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-900">{routes.length}</p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{t('routes.stats.total')}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-green-600">{routes.filter(r => r.status === 'active').length}</p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{t('routes.stats.active')}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-yellow-600">{routes.filter(r => r.status === 'pending').length}</p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{t('routes.stats.pending')}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-600">{routes.filter(r => r.status === 'completed').length}</p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{t('routes.stats.completed')}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Route Modal */}
+      {routeModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 rounded-t-3xl">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xl font-bold text-gray-900">{editingRouteId ? 'Edit Route' : 'New Route'}</h4>
-                  <p className="text-sm text-gray-500 mt-1">Dispatch or update service route details</p>
+                  <h4 className="text-2xl font-bold">{editingRouteId ? t('routes.modal.edit') : t('routes.modal.new')}</h4>
+                  <p className="text-blue-100 text-sm mt-1">{t('routes.modal.subtitle') || 'Assign technician and configure route'}</p>
                 </div>
                 <button
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors"
                   type="button"
                   onClick={() => setRouteModalOpen(false)}
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
                 >
-                  ×
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
+            </div>
 
-              <div className="p-8 space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Technician</label>
-
-                  <select
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
-                    value={formTech}
-                    onChange={(e) => setFormTech(e.target.value)}
-                  >
-                    <option value="">Select Technician</option>
-                    {teamMembers
-                      .filter(t => /technician|driver|field/i.test(t.role))
-                      .map((t) => (
-                        <option key={t.id} value={t.name}>
-                          {t.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Number of Units</label>
-                    <input
-                      type="number"
-                      min={1}
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
-                      placeholder="e.g. 5"
-                      value={formRouteUnits}
-                      onChange={(e) => setFormRouteUnits(Number(e.target.value))}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Estimated Time</label>
-                    <input
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
-                      placeholder="e.g. 2.5 hrs"
-                      value={formEta}
-                      onChange={(e) => setFormEta(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Status</label>
-                    <select
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
-                      value={formRouteStatus}
-                      onChange={(e) => setFormRouteStatus(e.target.value as RouteStatus)}
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="active">Active</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Priority</label>
-                    <select
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
-                      value={formRoutePriority}
-                      onChange={(e) => setFormRoutePriority(e.target.value as RoutePriority)}
-                    >
-                      <option value="high">High Priority</option>
-                      <option value="medium">Medium Priority</option>
-                      <option value="low">Low Priority</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Linked Unit (Optional)</label>
-                  <select
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
-                    value={formUnitId}
-                    onChange={(e) => setFormUnitId(e.target.value)}
-                  >
-                    <option value="">No specific unit linked</option>
-                    {units.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.serialNo} • {u.location}
+            <div className="p-8 space-y-6">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('routes.modal.technicianLabel') || 'Technician'}</label>
+                <select
+                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                  value={formTechId}
+                  onChange={(e) => {
+                    const m = teamMembers.find(t => t.id === e.target.value);
+                    setFormTechId(e.target.value);
+                    setFormTech(m?.name || '');
+                  }}
+                >
+                  <option value="">{t('routes.modal.selectTech') || 'Select a technician'}</option>
+                  {teamMembers
+                    .filter(t => /technician|driver|field/i.test(t.role))
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} - {t.role}
                       </option>
                     ))}
-                  </select>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('routes.modal.unitsLabel') || 'Number of Units'}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    placeholder={t('routes.modal.unitsPlaceholder') || '1'}
+                    value={formRouteUnits}
+                    onChange={(e) => setFormRouteUnits(Number(e.target.value))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('routes.modal.estimatedTime')}</label>
+                  <input
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    placeholder={t('routes.modal.estimatedTimePlaceholder')}
+                    value={formEta}
+                    onChange={(e) => setFormEta(e.target.value)}
+                  />
                 </div>
               </div>
 
-              <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  className="px-6 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all"
-                  onClick={() => setRouteModalOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl shadow-lg shadow-blue-500/30 hover:bg-blue-700 hover:-translate-y-0.5 transition-all"
-                  onClick={saveRoute}
-                >
-                  {editingRouteId ? 'Update Route' : 'Create Route'}
-                </button>
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('routes.modal.statusLabel')}</label>
+                  <select
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    value={formRouteStatus}
+                    onChange={(e) => setFormRouteStatus(e.target.value as RouteStatus)}
+                  >
+                    <option value="pending">{t('routes.status.pending')}</option>
+                    <option value="active">{t('routes.status.active')}</option>
+                    <option value="completed">{t('routes.status.completed')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{t('routes.modal.priorityLabel')}</label>
+                  <select
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent block p-3 outline-none transition-all hover:bg-white"
+                    value={formRoutePriority}
+                    onChange={(e) => setFormRoutePriority(e.target.value as RoutePriority)}
+                  >
+                    <option value="high">{t('routes.priority.highLabel')}</option>
+                    <option value="medium">{t('routes.priority.mediumLabel')}</option>
+                    <option value="low">{t('routes.priority.lowLabel')}</option>
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 
-  const renderFleetMap = () => (
-    <div className="space-y-6 animate-in fade-in duration-700">
-      <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Fleet Map</h3>
-          <div className="flex items-center space-x-2">
-            <select className="px-3 py-2 text-sm border rounded-md" value={analyticsRange} onChange={(e) => setAnalyticsRange(e.target.value as AnalyticsRange)}>
-              <option value="all">All</option>
-              <option value="30">30 days</option>
-              <option value="60">60 days</option>
-              <option value="90">90 days</option>
-              <option value="365">365 days</option>
-            </select>
-            <button type="button" className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={fetchAll}>
-              Refresh
-            </button>
-          </div>
-        </div>
-        <div className="p-6">
-          <div className="h-[500px] w-full rounded-2xl overflow-hidden border border-gray-100 relative z-0">
-            <LiveFleetMap
-              units={units}
-              trucks={teamMembers.filter(m =>
-                (m.role && (m.role.toLowerCase().includes('driver') || m.role.toLowerCase().includes('tech')))
-              )}
-            />
-          </div>
-
-          <div className="mt-4 flex items-center justify-center space-x-6 text-sm">
-            <div className="flex items-center cursor-pointer" onClick={() => setActiveTab('fleet')}>
-              <div className="w-3 h-3 bg-green-500 rounded-full mr-2" />
-              <span>Active ({units.filter((u) => u.status === 'active').length})</span>
-            </div>
-            <div className="flex items-center cursor-pointer" onClick={() => setActiveTab('maintenance')}>
-              <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2" />
-              <span>Maintenance ({units.filter((u) => u.status === 'maintenance').length})</span>
-            </div>
-            <div className="flex items-center cursor-pointer" onClick={() => setActiveTab('routes')}>
-              <div className="w-3 h-3 bg-red-500 rounded-full mr-2" />
-              <span>Offline ({units.filter((u) => u.status === 'offline').length})</span>
+            <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex gap-3 rounded-b-3xl">
+              <button
+                type="button"
+                className="flex-1 px-4 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all"
+                onClick={() => setRouteModalOpen(false)}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:-translate-y-0.5"
+                onClick={saveRoute}
+              >
+                {editingRouteId ? t('routes.modal.update') : t('routes.modal.create')}
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 
@@ -1813,11 +2786,13 @@ Forecast:
   /* -------------------------- Tab renderers -------------------------- */
 
   const handleChangePassword = () => {
-    alert("Password Change: This feature is currently in demo mode. In production, this would open a secure password reset form.");
+    // Navigate to profile page where password change is functional
+    window.location.href = '/profile';
   };
 
   const handleEditProfile = () => {
-    alert("Edit Profile: You are logged in as Administrator. Profile details are synced with the central registry.");
+    // Navigate to profile page where profile editing is functional
+    window.location.href = '/profile';
   };
 
   const handleDownloadData = () => {
@@ -1827,263 +2802,22 @@ Forecast:
 
 
   const renderSettings = () => (
-    <div className="space-y-8 animate-in fly-in-bottom duration-500">
-
-      {/* Settings Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-        {/* Left Column */}
-        <div className="space-y-8">
-          {/* Company Profile - Premium Card */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden group hover:shadow-2xl transition-all duration-300 h-fit">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-white/20 backdrop-blur-md rounded-xl shadow-inner border border-white/20">
-                  <Building className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-white">Company Profile</h3>
-                  <p className="text-blue-100 text-sm opacity-90">Manage your business identity</p>
-                </div>
-              </div>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Company Name</label>
-                  <input
-                    type="text"
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 block p-3 transition-all outline-none hover:bg-white"
-                    value={settings.companyName}
-                    onChange={(e) => setSettings((s: any) => ({ ...s, companyName: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Contact Email</label>
-                  <input
-                    type="email"
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 block p-3 transition-all outline-none hover:bg-white"
-                    value={settings.contactEmail}
-                    onChange={(e) => setSettings((s: any) => ({ ...s, contactEmail: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Phone Number</label>
-                  <input
-                    type="tel"
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 block p-3 transition-all outline-none hover:bg-white"
-                    value={settings.phone}
-                    onChange={(e) => setSettings((s: any) => ({ ...s, phone: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Business License</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      className="w-full bg-gray-50 border border-gray-200 text-gray-500 text-sm rounded-xl block p-3 cursor-not-allowed opacity-75"
-                      defaultValue="BL-2023-001234"
-                      readOnly
-                    />
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <CheckCircle className="w-5 h-5 text-green-500" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Save Button */}
-            <div className="px-6 pb-6">
-              <button
-                onClick={saveSettings}
-                disabled={savingSettings}
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {savingSettings ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    Save Settings
-                  </>
-                )}
-              </button>
-
-              {/* Success Message */}
-              {settingsSaved && (
-                <div className="mt-3 p-3 bg-green-50 text-green-700 text-sm rounded-xl border border-green-100 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <CheckCircle className="w-4 h-4" />
-                  Settings saved successfully!
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Integrations */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
-              <h3 className="font-bold text-gray-900">Connected Services</h3>
-              <div className="flex gap-1">
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              </div>
-            </div>
-            <div className="p-4 space-y-3">
-              {[
-                { name: 'M-Pesa Integration', icon: CreditCard, color: 'text-green-600', bg: 'bg-green-100', status: 'Active', sync: '2m ago' },
-                { name: 'WhatsApp Business', icon: MessageSquare, color: 'text-green-600', bg: 'bg-green-100', status: 'Active', sync: '1h ago' },
-                { name: 'OpenWeatherMap', icon: Globe, color: 'text-blue-600', bg: 'bg-blue-100', status: 'Providing Data', sync: 'Live' }
-              ].map((api, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 transition-all group">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2.5 rounded-lg ${api.bg} ${api.color}`}>
-                      <api.icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-gray-800 group-hover:text-blue-700 transition-colors">{api.name}</p>
-                      <p className="text-[10px] text-gray-400 font-medium tracking-wide uppercase">{api.sync}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center">
-                    <span className="px-2.5 py-1 bg-gray-50 border border-gray-200 text-gray-600 text-[10px] font-bold uppercase tracking-wider rounded-md">{api.status}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Preferences & Integrations Column */}
-        <div className="space-y-8">
-
-          {/* Security & Access */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-              <h3 className="font-bold text-gray-900">Security & Access</h3>
-              <Lock className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="p-6 space-y-4">
-              <button onClick={handleEditProfile} className="w-full flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors border border-gray-100 group">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-100 rounded-lg text-blue-600 group-hover:bg-blue-200 transition-colors">
-                    <User className="w-5 h-5" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-semibold text-gray-900 text-sm">Edit Profile</p>
-                    <p className="text-xs text-gray-500">Update personal details</p>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              <button onClick={handleChangePassword} className="w-full flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors border border-gray-100 group">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-100 rounded-lg text-indigo-600 group-hover:bg-indigo-200 transition-colors">
-                    <Lock className="w-5 h-5" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-semibold text-gray-900 text-sm">Change Password</p>
-                    <p className="text-xs text-gray-500">Update your security key</p>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
-          </div>
-
-          {/* Data Privacy & AI Transparency */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-              <h3 className="font-bold text-gray-900">Data & AI Responsibility</h3>
-              <Shield className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="p-6 space-y-5">
-              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                <p className="text-sm text-blue-800 leading-relaxed">
-                  This platform uses AI to optimize routes and forecast demand.
-                  <strong className="block mt-1">Privacy Guarantee:</strong> All personal data is anonymized before processing. We do not share customer identities with external AI models.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <p className="font-semibold text-gray-900 text-sm">AI Optimization</p>
-                  <p className="text-xs text-gray-500">Allow anonymized fleet analysis</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" checked readOnly />
-                  <div className="w-10 h-6 bg-blue-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all shadow-sm"></div>
-                </label>
-              </div>
-
-              <button onClick={handleDownloadData} className="w-full py-3 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2 text-sm">
-                <Download className="w-4 h-4" /> Export My Data (GDPR)
-              </button>
-            </div>
-          </div>
-
-          {/* System Preferences */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-              <h3 className="font-bold text-gray-900">System Preferences</h3>
-              <Settings className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="p-6 space-y-6">
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 block">Language / Lugha</label>
-                <div className="bg-gray-100 p-1 rounded-xl inline-flex w-full relative">
-                  <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ${locale === 'sw' ? 'translate-x-[calc(100%+8px)]' : 'translate-x-0'}`}></div>
-                  <button onClick={() => setLocale('en')} className={`relative z-10 w-1/2 py-2.5 text-sm font-bold text-center rounded-lg transition-colors ${locale === 'en' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>English</button>
-                  <button onClick={() => setLocale('sw')} className={`relative z-10 w-1/2 py-2.5 text-sm font-bold text-center rounded-lg transition-colors ${locale === 'sw' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>Kiswahili</button>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
-                    <MessageSquare className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">WhatsApp Alerts</p>
-                    <p className="text-xs text-blue-600/70">Get real-time updates</p>
-                  </div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" checked={Boolean(settings.whatsappNotifications)} onChange={(e) => setSettings((s: any) => ({ ...s, whatsappNotifications: e.target.checked }))} />
-                  <div className="w-12 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600 shadow-inner"></div>
-                </label>
-              </div>
-            </div>
-          </div>
-
-
-
-        </div>
-      </div>
+    <div className="space-y-6 animate-in fly-in-bottom duration-500">
 
       {/* Team Members Section */}
-      <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
-        <div className="p-8 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-gray-50 to-white">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600 shadow-sm">
-              <User className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-gray-900">Team Management</h3>
-              <p className="text-gray-500 text-sm">Manage access and roles</p>
-            </div>
+      <div className="bg-white shadow sm:rounded-lg overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-lg leading-6 font-medium text-gray-900">{t('settings.team.title')}</h3>
+            <p className="mt-1 text-sm text-gray-500">{t('settings.team.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="relative group">
               <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
               <input
                 type="text"
-                placeholder="Search members..."
-                className="pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-64 shadow-sm"
+                placeholder={t('settings.team.search')}
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 outline-none w-64"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -2091,14 +2825,14 @@ Forecast:
             <button
               type="button"
               onClick={openAddMember}
-              className="px-5 py-2.5 bg-gray-900 text-white font-medium rounded-xl hover:bg-black shadow-lg shadow-gray-900/20 transition-all flex items-center hover:-translate-y-0.5"
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
             >
-              <Plus className="w-4 h-4 mr-2" /> Add Member
+              <Plus className="w-4 h-4 mr-2" /> {t('settings.team.add')}
             </button>
           </div>
         </div>
 
-        <div className="p-8">
+        <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {teamMembers
               .filter(
@@ -2108,29 +2842,29 @@ Forecast:
                   member.email.toLowerCase().includes(searchTerm.toLowerCase()),
               )
               .map((member) => (
-                <div key={member.id} className="relative group bg-white border border-gray-100 rounded-2xl p-5 hover:shadow-xl hover:shadow-blue-500/10 hover:border-blue-100 transition-all duration-300">
+                <div key={member.id} className="relative group bg-white border border-gray-200 rounded-lg p-5 hover:border-blue-300 transition-all duration-300">
                   <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
-                    <button onClick={() => openEditMember(member)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                      <Edit className="w-3.5 h-3.5" />
+                    <button onClick={() => openEditMember(member)} className="p-1 text-gray-400 hover:text-blue-600">
+                      <Edit className="w-4 h-4" />
                     </button>
-                    <button onClick={() => deleteMember(member.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <button onClick={() => deleteMember(member.id)} className="p-1 text-gray-400 hover:text-red-600">
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
 
                   <div className="flex flex-col items-center text-center">
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-xl font-bold text-gray-600 mb-3 shadow-inner border border-white">
+                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg font-bold text-gray-600 mb-3">
                       {member.name.charAt(0)}
                     </div>
-                    <h4 className="font-bold text-gray-900 text-base mb-1">{member.name}</h4>
-                    <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider rounded-md border border-blue-100 mb-4">{member.role}</span>
+                    <h4 className="font-medium text-gray-900 text-sm mb-1">{member.name}</h4>
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-medium rounded-full mb-4">{member.role}</span>
 
-                    <div className="w-full space-y-2 border-t border-gray-50 pt-4 text-left">
-                      <div className="flex items-center text-xs text-gray-500">
-                        <User className="w-3.5 h-3.5 mr-2 opacity-70" /> {member.email}
+                    <div className="w-full space-y-1 border-t border-gray-100 pt-3 text-left">
+                      <div className="flex items-center text-xs text-gray-500 truncate">
+                        <User className="w-3 h-3 mr-2 text-gray-400" /> {member.email}
                       </div>
                       <div className="flex items-center text-xs text-gray-500">
-                        <Calendar className="w-3.5 h-3.5 mr-2 opacity-70" /> Joined {member.joinDate}
+                        <Calendar className="w-3 h-3 mr-2 text-gray-400" /> {t('settings.team.joined')} {member.joinDate}
                       </div>
                     </div>
                   </div>
@@ -2140,96 +2874,294 @@ Forecast:
           {teamMembers.length === 0 && (
             <div className="text-center py-12">
               <User className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 font-medium">No team members found.</p>
+              <p className="text-gray-500 font-medium">{t('settings.team.noMembers')}</p>
             </div>
           )}
         </div>
       </div>
 
+      {/* Grid: Integrations and Data Privacy */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Integrations */}
+        <div className="bg-white shadow sm:rounded-lg overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-200">
+            <h3 className="text-lg leading-6 font-medium text-gray-900">{t('settings.connected.title')}</h3>
+          </div>
+          <div className="p-6 space-y-4">
+            {[
+              { name: t('settings.integrations.mpesa'), icon: CreditCard, color: 'text-green-600', bg: 'bg-green-100', status: t('settings.integrations.status.active'), sync: '2m ago' },
+              { name: t('settings.integrations.whatsapp'), icon: MessageSquare, color: 'text-green-600', bg: 'bg-green-100', status: t('settings.integrations.status.active'), sync: '1h ago' },
+              { name: t('settings.integrations.weather'), icon: Globe, color: 'text-blue-600', bg: 'bg-blue-100', status: t('settings.integrations.status.providing'), sync: t('settings.integrations.sync.live') }
+            ].map((api, idx) => (
+              <div key={idx} className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-md ${api.bg} ${api.color}`}>
+                    <api.icon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{api.name}</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">{api.sync}</p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  {api.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Data Privacy & AI Transparency */}
+        <div className="bg-white shadow sm:rounded-lg overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="text-lg leading-6 font-medium text-gray-900">{t('settings.data.title')}</h3>
+            <Shield className="w-5 h-5 text-gray-400" />
+          </div>
+          <div className="p-6 space-y-5">
+            <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
+              <p className="text-sm text-blue-700">
+                {t('settings.data.intro')}
+                <strong className="block mt-1 font-semibold">{t('settings.data.privacy')}</strong> {t('settings.data.disclaimer')}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{t('settings.data.optIn')}</p>
+                <p className="text-xs text-gray-500">{t('settings.data.allowAnalysis')}</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked readOnly />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <button onClick={handleDownloadData} className="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+              <Download className="w-4 h-4 mr-2" /> {t('settings.data.export')}
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* System Preferences - Moved to Bottom */}
+      <div className="bg-white shadow sm:rounded-lg overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+          <h3 className="text-lg leading-6 font-medium text-gray-900">{t('settings.system.title')}</h3>
+          <Settings className="w-5 h-5 text-gray-400" />
+        </div>
+        <div className="p-6 space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Language / Lugha</label>
+            <div className="flex space-x-4">
+              <button
+                type="button"
+                onClick={() => setLocale('en')}
+                className={`flex-1 py-2 px-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${locale === 'en' ? 'bg-blue-50 border-blue-500 text-blue-700 z-10' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                onClick={() => setLocale('sw')}
+                className={`flex-1 py-2 px-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${locale === 'sw' ? 'bg-blue-50 border-blue-500 text-blue-700 z-10' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+              >
+                Kiswahili
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-full text-blue-600">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{t('settings.system.whatsapp')}</p>
+                  <p className="text-xs text-gray-500">{t('settings.system.updates')}</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={Boolean(settings.whatsappNotifications)} onChange={(e) => setSettings((s: any) => ({ ...s, whatsappNotifications: e.target.checked }))} />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-green-100 rounded-full text-green-600">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{t('settings.system.emailNotifications')}</p>
+                  <p className="text-xs text-gray-500">{t('settings.system.emailDesc')}</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={Boolean(settings.emailNotifications)} onChange={(e) => setSettings((s: any) => ({ ...s, emailNotifications: e.target.checked }))} />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.system.sessionTimeout')}</label>
+              <select
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                value={settings.sessionTimeout}
+                onChange={(e) => setSettings((s: any) => ({ ...s, sessionTimeout: e.target.value }))}
+              >
+                <option value="5">{t('settings.system.timeout.5min')}</option>
+                <option value="15">{t('settings.system.timeout.15min')}</option>
+                <option value="30">{t('settings.system.timeout.30min')}</option>
+                <option value="60">{t('settings.system.timeout.1hr')}</option>
+                <option value="120">{t('settings.system.timeout.2hr')}</option>
+                <option value="240">{t('settings.system.timeout.4hr')}</option>
+                <option value="300">{t('settings.system.timeout.5hr')}</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">{t('settings.system.timeoutDesc')}</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.system.theme')}</label>
+              <div className="flex space-x-4">
+                <button
+                  type="button"
+                  onClick={() => setSettings((s: any) => ({ ...s, theme: 'light' }))}
+                  className={`flex-1 py-2 px-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${settings.theme === 'light' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                >
+                  ☀️ {t('settings.system.themeLight')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettings((s: any) => ({ ...s, theme: 'dark' }))}
+                  className={`flex-1 py-2 px-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${settings.theme === 'dark' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                >
+                  🌙 {t('settings.system.themeDark')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t('settings.system.currency')}</label>
+            <select
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              value={settings.currency}
+              onChange={(e) => setSettings((s: any) => ({ ...s, currency: e.target.value }))}
+            >
+              <option value="KES">{t('settings.system.currencyKES')}</option>
+              <option value="USD">{t('settings.system.currencyUSD')}</option>
+              <option value="EUR">{t('settings.system.currencyEUR')}</option>
+              <option value="GBP">{t('settings.system.currencyGBP')}</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">{t('settings.system.currencyDesc', { currency: settings.currency })}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Save Button */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={saveSettings}
+          disabled={savingSettings}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+        >
+          {savingSettings ? <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" /> : null}
+          {settingsSaved ? t('settings.save.saved') : t('settings.save.saveSettings')}
+        </button>
+      </div>
+
+
+
       {/* Team Member Modal */}
       {
         memberModalOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-300">
-              <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
-                <h3 className="text-xl font-bold text-gray-900">
-                  {editingMemberId ? 'Edit Team Member' : 'Add Team Member'}
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-300">
+              <div className="px-6 py-4 border-b border-gray-200 bg-white">
+                <h3 className="text-lg font-medium text-gray-900">
+                  {editingMemberId ? t('settings.team.modal.edit') : t('settings.team.modal.addTitle')}
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  {editingMemberId ? 'Update member information' : 'Add a new member to your team'}
+                  {editingMemberId ? t('settings.team.modal.editDesc') : t('settings.team.modal.addDesc')}
                 </p>
               </div>
 
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Full Name</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.team.modal.name')}</label>
                   <input
                     type="text"
                     value={formMemberName}
                     onChange={(e) => setFormMemberName(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
-                    placeholder="John Doe"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    placeholder={t('settings.team.placeholders.name')}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Role</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.team.modal.role')}</label>
                   <input
                     type="text"
                     value={formMemberRole}
                     onChange={(e) => setFormMemberRole(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
-                    placeholder="Technician"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    placeholder={t('settings.team.placeholders.role')}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Email</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.team.modal.email')}</label>
                   <input
                     type="email"
                     value={formMemberEmail}
                     onChange={(e) => setFormMemberEmail(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
-                    placeholder="john@example.com"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    placeholder={t('settings.team.placeholders.email')}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Phone</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.team.modal.phone')}</label>
                   <input
                     type="tel"
                     value={formMemberPhone}
                     onChange={(e) => setFormMemberPhone(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
-                    placeholder="+254 700 000 000"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    placeholder={t('settings.team.placeholders.phone')}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Status</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('settings.team.modal.status')}</label>
                   <select
                     value={formMemberStatus}
                     onChange={(e) => setFormMemberStatus(e.target.value as TeamMember['status'])}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all hover:bg-white"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
+                    <option value="active">{t('settings.team.status.active')}</option>
+                    <option value="inactive">{t('settings.team.status.inactive')}</option>
                   </select>
                 </div>
               </div>
 
-              <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex gap-3">
-                <button
-                  onClick={() => setMemberModalOpen(false)}
-                  className="flex-1 px-4 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all"
-                >
-                  Cancel
-                </button>
+              <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex gap-3 flex-row-reverse">
                 <button
                   onClick={saveMember}
-                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:-translate-y-0.5"
+                  className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 >
-                  {editingMemberId ? 'Update' : 'Add'} Member
+                  {editingMemberId ? t('settings.team.modal.update') : t('settings.team.modal.addBtn')}
+                </button>
+                <button
+                  onClick={() => setMemberModalOpen(false)}
+                  className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -2250,15 +3182,15 @@ Forecast:
         return renderRoutes();
 
       case 'billing':
-        return <Billing />;
+        return <Suspense fallback={<div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}><Billing /></Suspense>;
       case 'insights':
-        return <Insights />;
+        return <Suspense fallback={<div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}><Insights /></Suspense>;
       case 'bookings':
         return renderBookings();
       case 'maintenance':
-        return renderMaintenance();
+        return <Suspense fallback={<div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}><Maintenance /></Suspense>;
       case 'analytics':
-        return <Analytics />;
+        return <Suspense fallback={<div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}><Analytics /></Suspense>;
       case 'settings':
         return renderSettings();
       default:

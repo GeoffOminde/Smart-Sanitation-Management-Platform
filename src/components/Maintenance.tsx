@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Wrench, CheckCircle, AlertTriangle, Clock, Plus, Trash2, Calendar } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface MaintenanceLog {
     id: string;
@@ -19,9 +20,17 @@ interface Unit {
     location: string;
 }
 
+interface TeamMember {
+    id: string;
+    name: string;
+    role: string;
+}
+
 const Maintenance = () => {
+    const { t } = useLocale();
     const [logs, setLogs] = useState<MaintenanceLog[]>([]);
     const [units, setUnits] = useState<Unit[]>([]);
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
     const [loading, setLoading] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [filter, setFilter] = useState<'all' | 'scheduled' | 'completed'>('all');
@@ -68,9 +77,10 @@ const Maintenance = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [logsResp, unitsResp] = await Promise.all([
+            const [logsResp, unitsResp, membersResp] = await Promise.all([
                 apiFetch('/api/maintenance'),
-                apiFetch('/api/units')
+                apiFetch('/api/units'),
+                apiFetch('/api/team-members')
             ]);
 
             if (logsResp.ok) {
@@ -81,6 +91,11 @@ const Maintenance = () => {
             if (unitsResp.ok) {
                 const data = await unitsResp.json();
                 setUnits(Array.isArray(data) ? data : []);
+            }
+
+            if (membersResp.ok) {
+                const data = await membersResp.json();
+                setTeamMembers(Array.isArray(data) ? data : []);
             }
         } catch (err) {
             console.error('Failed to fetch maintenance data', err);
@@ -157,6 +172,9 @@ const Maintenance = () => {
         return true;
     });
 
+    // Helper to shorten Tech ID
+    const formatTechId = (id: string) => id ? `T-${id.slice(0, 4).toUpperCase()}` : '-';
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Header / Stats Overview */}
@@ -166,14 +184,14 @@ const Maintenance = () => {
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-orange-100 font-medium text-sm uppercase tracking-wide">Scheduled</p>
+                                <p className="text-orange-100 font-medium text-sm uppercase tracking-wide">{t('maintenance.stats.scheduled')}</p>
                                 <h3 className="text-4xl font-extrabold mt-1">{stats.scheduled}</h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <Clock className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-sm text-orange-100 font-medium">Jobs pending execution</p>
+                        <p className="mt-4 text-sm text-orange-100 font-medium">{t('maintenance.stats.scheduledDesc')}</p>
                     </div>
                 </div>
 
@@ -182,14 +200,14 @@ const Maintenance = () => {
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-emerald-100 font-medium text-sm uppercase tracking-wide">Completed</p>
+                                <p className="text-emerald-100 font-medium text-sm uppercase tracking-wide">{t('maintenance.stats.completed')}</p>
                                 <h3 className="text-4xl font-extrabold mt-1">{stats.completed}</h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <CheckCircle className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-sm text-emerald-100 font-medium">Successfully resolved</p>
+                        <p className="mt-4 text-sm text-emerald-100 font-medium">{t('maintenance.stats.completedDesc')}</p>
                     </div>
                 </div>
 
@@ -198,14 +216,14 @@ const Maintenance = () => {
                     <div className="relative z-10">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-rose-100 font-medium text-sm uppercase tracking-wide">Critical</p>
+                                <p className="text-rose-100 font-medium text-sm uppercase tracking-wide">{t('maintenance.stats.critical')}</p>
                                 <h3 className="text-4xl font-extrabold mt-1">{stats.critical}</h3>
                             </div>
                             <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
                                 <AlertTriangle className="w-6 h-6 text-white" />
                             </div>
                         </div>
-                        <p className="mt-4 text-sm text-rose-100 font-medium">Require immediate attention</p>
+                        <p className="mt-4 text-sm text-rose-100 font-medium">{t('maintenance.stats.criticalDesc')}</p>
                     </div>
                 </div>
             </div>
@@ -214,7 +232,7 @@ const Maintenance = () => {
             {showForm && (
                 <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-8 animate-in fade-in zoom-in-95 duration-300">
                     <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
-                        <h3 className="text-xl font-bold text-gray-900">Schedule New Maintenance</h3>
+                        <h3 className="text-xl font-bold text-gray-900">{t('maintenance.form.title')}</h3>
                         <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600">
                             ✕
                         </button>
@@ -223,13 +241,13 @@ const Maintenance = () => {
                     <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <div className="flex justify-between items-center mb-2">
-                                <label className="block text-sm font-semibold text-gray-700">Target Unit</label>
+                                <label className="block text-sm font-semibold text-gray-700">{t('maintenance.form.targetUnit')}</label>
                                 <button
                                     type="button"
                                     onClick={() => setShowAddUnit(true)}
                                     className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg"
                                 >
-                                    <Plus className="w-3 h-3" /> New Unit
+                                    <Plus className="w-3 h-3" /> {t('maintenance.form.newUnit')}
                                 </button>
                             </div>
                             <select
@@ -238,37 +256,37 @@ const Maintenance = () => {
                                 onChange={e => setUnitId(e.target.value)}
                                 required
                             >
-                                <option value="">Select Unit...</option>
+                                <option value="">{t('maintenance.form.selectUnit')}</option>
                                 {units.map(u => (
                                     <option key={u.id} value={u.id}>{u.serialNo} - {u.location}</option>
                                 ))}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">Maintenance Type</label>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">{t('maintenance.form.type')}</label>
                             <select
                                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-gray-50 transition-all"
                                 value={type}
                                 onChange={e => setType(e.target.value)}
                             >
-                                <option value="Routine">Routine Check</option>
-                                <option value="Repair">Repair</option>
-                                <option value="Cleaning">Cleaning</option>
-                                <option value="Emergency">Emergency</option>
+                                <option value="Routine">{t('maintenance.form.type.routine')}</option>
+                                <option value="Repair">{t('maintenance.form.type.repair')}</option>
+                                <option value="Cleaning">{t('maintenance.form.type.cleaning')}</option>
+                                <option value="Emergency">{t('maintenance.form.type.emergency')}</option>
                             </select>
                         </div>
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">Description</label>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">{t('maintenance.form.description')}</label>
                             <textarea
                                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-gray-50 transition-all"
                                 rows={3}
                                 value={description}
                                 onChange={e => setDescription(e.target.value)}
-                                placeholder="Describe the issue or task details..."
+                                placeholder={t('maintenance.form.descriptionPlaceholder')}
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">Scheduled Date</label>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">{t('maintenance.form.date')}</label>
                             <input
                                 type="date"
                                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-gray-50 transition-all"
@@ -278,14 +296,17 @@ const Maintenance = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">Technician ID</label>
-                            <input
-                                type="text"
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">{t('maintenance.form.technicianId')}</label>
+                            <select
                                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-gray-50 transition-all"
                                 value={technicianId}
                                 onChange={e => setTechnicianId(e.target.value)}
-                                placeholder="e.g. TECH-001"
-                            />
+                            >
+                                <option value="">{t('maintenance.placeholder.techId') || 'Select Technician'}</option>
+                                {teamMembers.map(m => (
+                                    <option key={m.id} value={m.id}>{formatTechId(m.id)} - {m.name}</option>
+                                ))}
+                            </select>
                         </div>
                         <div className="md:col-span-2 flex justify-end gap-3 pt-4">
                             <button
@@ -293,13 +314,13 @@ const Maintenance = () => {
                                 onClick={() => setShowForm(false)}
                                 className="px-6 py-2.5 border border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors"
                             >
-                                Cancel
+                                {t('common.cancel')}
                             </button>
                             <button
                                 type="submit"
                                 className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all transform active:scale-95"
                             >
-                                Schedule Maintenance
+                                {t('maintenance.form.submit')}
                             </button>
                         </div>
                     </form>
@@ -314,8 +335,8 @@ const Maintenance = () => {
                             <Wrench className="w-5 h-5" />
                         </div>
                         <div>
-                            <h3 className="text-lg font-bold text-gray-900">Maintenance Logs</h3>
-                            <p className="text-xs text-gray-500">History and active tasks</p>
+                            <h3 className="text-lg font-bold text-gray-900">{t('maintenance.logs.title')}</h3>
+                            <p className="text-xs text-gray-500">{t('maintenance.logs.subtitle')}</p>
                         </div>
                     </div>
 
@@ -327,7 +348,7 @@ const Maintenance = () => {
                                     onClick={() => setFilter(f as any)}
                                     className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wide rounded-lg transition-all ${filter === f ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
-                                    {f}
+                                    {f === 'all' ? t('maintenance.logs.filter.all') : f === 'scheduled' ? t('maintenance.logs.filter.scheduled') : t('maintenance.logs.filter.completed')}
                                 </button>
                             ))}
                         </div>
@@ -336,7 +357,7 @@ const Maintenance = () => {
                             onClick={() => setShowForm(!showForm)}
                         >
                             <Plus className="w-4 h-4 mr-2" />
-                            New Task
+                            {t('maintenance.logs.newTask')}
                         </button>
                     </div>
                 </div>
@@ -345,13 +366,13 @@ const Maintenance = () => {
                     <table className="w-full">
                         <thead className="bg-gray-50 border-b border-gray-100">
                             <tr>
-                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Unit Details</th>
-                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Type</th>
-                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Description</th>
-                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date</th>
-                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Technician</th>
-                                <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.status')}</th>
+                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.unitDetails')}</th>
+                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.type')}</th>
+                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.description')}</th>
+                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.date')}</th>
+                                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.technician')}</th>
+                                <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">{t('maintenance.table.actions')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 bg-white">
@@ -360,14 +381,14 @@ const Maintenance = () => {
                                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                                         <div className="flex justify-center items-center gap-2">
                                             <div className="w-4 h-4 border-2 border-blue-600 rounded-full animate-spin border-t-transparent"></div>
-                                            Loading logs...
+                                            {t('maintenance.table.loading')}
                                         </div>
                                     </td>
                                 </tr>
                             ) : filteredLogs.length === 0 ? (
                                 <tr>
                                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                                        No maintenance logs found matching criteria.
+                                        {t('maintenance.table.empty')}
                                     </td>
                                 </tr>
                             ) : (
@@ -376,21 +397,24 @@ const Maintenance = () => {
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             {log.completedDate ? (
                                                 <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-green-100 text-green-700 border border-green-200">
-                                                    <CheckCircle className="w-3 h-3 mr-1.5" /> Completed
+                                                    <CheckCircle className="w-3 h-3 mr-1.5" /> {t('maintenance.status.completed')}
                                                 </span>
                                             ) : (
                                                 <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200">
-                                                    <Calendar className="w-3 h-3 mr-1.5" /> Scheduled
+                                                    <Calendar className="w-3 h-3 mr-1.5" /> {t('maintenance.status.scheduled')}
                                                 </span>
                                             )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm font-bold text-gray-900">{log.unit?.serialNo || 'Unknown'}</div>
+                                            <div className="text-sm font-bold text-gray-900">{log.unit?.serialNo || t('common.unknown')}</div>
                                             <div className="text-xs text-gray-500">{log.unit?.location}</div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                                             <span className={`px-2 py-1 rounded-md text-xs font-medium ${log.type === 'Emergency' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-600'}`}>
-                                                {log.type}
+                                                {log.type === 'Routine' ? t('maintenance.form.type.routine') :
+                                                    log.type === 'Repair' ? t('maintenance.form.type.repair') :
+                                                        log.type === 'Cleaning' ? t('maintenance.form.type.cleaning') :
+                                                            log.type === 'Emergency' ? t('maintenance.form.type.emergency') : log.type}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={log.description}>
@@ -403,9 +427,9 @@ const Maintenance = () => {
                                             {log.technicianId ? (
                                                 <span className="flex items-center gap-1">
                                                     <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">
-                                                        {log.technicianId.charAt(0)}
+                                                        {log.technicianId.charAt(0).toUpperCase()}
                                                     </div>
-                                                    {log.technicianId}
+                                                    {formatTechId(log.technicianId)}
                                                 </span>
                                             ) : '-'}
                                         </td>
@@ -440,27 +464,27 @@ const Maintenance = () => {
             {showAddUnit && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Add New Unit</h3>
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">{t('maintenance.modal.addUnit.title')}</h3>
                         <form onSubmit={handleAddUnit} className="space-y-4">
                             <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Serial Number</label>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('maintenance.modal.addUnit.serial')}</label>
                                 <input
                                     type="text"
                                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                     value={newSerial}
                                     onChange={e => setNewSerial(e.target.value)}
-                                    placeholder="e.g. ST-005"
+                                    placeholder={t('maintenance.placeholder.unitSerial')}
                                     required
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Location / Area</label>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('maintenance.modal.addUnit.location')}</label>
                                 <input
                                     type="text"
                                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                     value={newLocation}
                                     onChange={e => setNewLocation(e.target.value)}
-                                    placeholder="e.g. Market St."
+                                    placeholder={t('maintenance.placeholder.unitLocation')}
                                     required
                                 />
                             </div>
@@ -470,13 +494,13 @@ const Maintenance = () => {
                                     onClick={() => setShowAddUnit(false)}
                                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
                                 >
-                                    Cancel
+                                    {t('common.cancel')}
                                 </button>
                                 <button
                                     type="submit"
                                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700"
                                 >
-                                    Add Unit
+                                    {t('maintenance.modal.addUnit.submit')}
                                 </button>
                             </div>
                         </form>

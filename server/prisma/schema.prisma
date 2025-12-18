@@ -8,13 +8,15 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String    @id @default(uuid())
+  email            String    @unique
+  password         String
+  name             String
+  role             String
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 
@@ -48,12 +50,19 @@ model Booking {
 model Unit {
   id             String   @id @default(uuid())
   serialNo       String   @unique
+  type           String   @default("Standard Portable") // Standard Portable, Deluxe Portable, Wheelchair Accessible
   location       String
   fillLevel      Int
   batteryLevel   Int
   status         String
   lastSeen       DateTime @default(now())
   coordinates    String?
+  // IoT Sensor Data
+  temperature    Float?   // Temperature in Celsius
+  humidity       Float?   // Humidity percentage
+  odorLevel      Int?     // Odor level 0-100
+  usageCount     Int      @default(0) // Number of uses
+  lastServiceDate DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   maintenanceLogs MaintenanceLog[]
@@ -85,6 +94,7 @@ model NotificationLog {
 model Route {
   id            String   @id @default(uuid())
   technician    String
+  technicianId  String?
   units         Int
   status        String
   estimatedTime String
@@ -98,7 +108,7 @@ model TeamMember {
   id        String   @id @default(uuid())
   name      String
   role      String
-  email     String
+  email     String   @unique
   phone     String
   status    String
   joinDate  DateTime
@@ -106,6 +116,29 @@ model TeamMember {
   lastLng   Float?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Plan {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  price       String
+  period      String
+  features    String   // JSON string of string[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AnalyticsDaily {
+  id            String   @id @default(uuid())
+  date          DateTime @unique
+  revenue       Float    @default(0)
+  pickups       Int      @default(0)
+  distance      Float    @default(0)
+  fuelCost      Float    @default(0)
+  activeUnits   Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Settings {
@@ -118,6 +151,8 @@ model Settings {
   sessionTimeout        String   @default("30")
   emailNotifications    Boolean  @default(true)
   whatsappNotifications Boolean  @default(true)
+  theme                 String   @default("light")
+  currency              String   @default("KES")
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }

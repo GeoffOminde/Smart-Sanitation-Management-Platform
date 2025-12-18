@@ -3,11 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Users, Truck, Bell } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { useNotifications } from './contexts/NotificationContext';
+import { useLocale } from './contexts/LocaleContext';
 
 const Navigation: React.FC = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
   const { notifications, markAsRead, markAllAsRead, clearAll, unreadCount } = useNotifications();
+  const { t } = useLocale();
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -69,24 +71,40 @@ const Navigation: React.FC = () => {
               to="/dashboard"
               className="px-4 py-1.5 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-white rounded-full transition-all duration-200"
             >
-              Overview
+              {t('nav.overview')}
             </Link>
             <Link
               to="/value"
               className="px-4 py-1.5 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-white rounded-full transition-all duration-200"
             >
-              Value
-            </Link>
-            <Link
-              to="/assistant"
-              className="px-4 py-1.5 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-white rounded-full transition-all duration-200"
-            >
-              Assistant
+              {t('nav.value')}
             </Link>
           </div>
 
           {/* Right Actions Section */}
           <div className="flex items-center gap-4">
+
+            {/* Regional Flags */}
+            <div className="flex items-center gap-3 mr-1 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100 hidden md:flex">
+              <img
+                src="https://flagcdn.com/w40/ke.png"
+                alt="Kenya"
+                className="w-6 h-4 object-cover rounded shadow-sm hover:scale-125 transition-transform cursor-pointer"
+                title="Kenya Operations"
+              />
+              <img
+                src="https://flagcdn.com/w40/ug.png"
+                alt="Uganda"
+                className="w-6 h-4 object-cover rounded shadow-sm hover:scale-125 transition-transform cursor-pointer"
+                title="Uganda Operations"
+              />
+              <img
+                src="https://flagcdn.com/w40/tz.png"
+                alt="Tanzania"
+                className="w-6 h-4 object-cover rounded shadow-sm hover:scale-125 transition-transform cursor-pointer"
+                title="Tanzania Operations"
+              />
+            </div>
 
             {/* Notifications */}
             <div className="relative" ref={notificationsRef}>
@@ -108,10 +126,10 @@ const Navigation: React.FC = () => {
               {notificationsOpen && (
                 <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 overflow-hidden transform origin-top-right transition-all animate-in fade-in zoom-in-95 duration-200 z-50">
                   <div className="px-5 py-4 border-b border-gray-50 bg-gray-50/50 flex justify-between items-center">
-                    <h3 className="text-sm font-bold text-gray-900">Notifications</h3>
+                    <h3 className="text-sm font-bold text-gray-900">{t('nav.notifications')}</h3>
                     <div className="flex gap-3 text-xs">
-                      <button onClick={markAllAsRead} disabled={unreadCount === 0} className="text-blue-600 hover:underline disabled:text-gray-400">Mark all read</button>
-                      <button onClick={clearAll} disabled={notifications.length === 0} className="text-gray-500 hover:text-red-500 disabled:text-gray-300">Clear</button>
+                      <button onClick={markAllAsRead} disabled={unreadCount === 0} className="text-blue-600 hover:underline disabled:text-gray-400">{t('nav.markRead')}</button>
+                      <button onClick={clearAll} disabled={notifications.length === 0} className="text-gray-500 hover:text-red-500 disabled:text-gray-300">{t('nav.clear')}</button>
                     </div>
                   </div>
                   <div className="max-h-80 overflow-y-auto custom-scrollbar">
@@ -120,7 +138,7 @@ const Navigation: React.FC = () => {
                         <div className="mx-auto w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mb-2">
                           <Bell className="w-5 h-5 text-gray-300" />
                         </div>
-                        <p className="text-sm text-gray-500">No new notifications</p>
+                        <p className="text-sm text-gray-500">{t('nav.noNotifications')}</p>
                       </div>
                     ) : (
                       <div className="divide-y divide-gray-50">
@@ -156,7 +174,7 @@ const Navigation: React.FC = () => {
               >
                 <div className="text-right hidden sm:block">
                   <p className="text-sm font-semibold text-gray-900 leading-none group-hover:text-blue-600 transition-colors">Admin User</p>
-                  <p className="text-xs text-gray-500 mt-1">Super Admin</p>
+                  <p className="text-xs text-gray-500 mt-1">{t('nav.user.role')}</p>
                 </div>
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 p-0.5 shadow-inner ring-2 ring-transparent group-hover:ring-blue-100 transition-all">
                   <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
@@ -174,14 +192,14 @@ const Navigation: React.FC = () => {
                       onClick={() => setProfileOpen(false)}
                       className="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors"
                     >
-                      Profile
+                      {t('nav.profile')}
                     </Link>
                     <Link
                       to="/admin/transactions"
                       onClick={() => setProfileOpen(false)}
                       className="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors"
                     >
-                      Admin Transactions
+                      {t('nav.adminTransactions')}
                     </Link>
                   </div>
                   <div className="p-2 border-t border-gray-50 bg-gray-50/50">
@@ -193,7 +211,7 @@ const Navigation: React.FC = () => {
                       }}
                       className="flex items-center w-full px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors"
                     >
-                      Log out
+                      {t('nav.logout')}
                     </button>
                   </div>
                 </div>

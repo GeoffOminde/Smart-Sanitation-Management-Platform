@@ -4,7 +4,9 @@
 // Configure a production API host by setting VITE_API_BASE (without trailing slash), e.g.
 // VITE_API_BASE=https://smart-sanitation-backend.example.com
 
-export const API_BASE = (import.meta as any)?.env?.VITE_API_BASE?.replace(/\/$/, '') || 'http://localhost:3001';
+// In Docker/Prod, we use relative paths so Nginx can proxy to /api.
+// In dev (Vite), we might target localhost:3001 if not proxying.
+export const API_BASE = (import.meta as any)?.env?.VITE_API_BASE?.replace(/\/$/, '') || ''; // Empty string = relative path
 
 /**
  * Constructs the full API URL by prepending the base URL if it exists.

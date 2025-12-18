@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from './AuthContext';
+import { useLocale } from './contexts/LocaleContext';
 import { Lock, User, Eye, EyeOff } from 'lucide-react';
 import { trackNow } from './lib/analytics';
 
@@ -10,8 +11,13 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetMessage, setResetMessage] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
+  const { t } = useLocale();
 
   React.useEffect(() => {
     if (isAuthenticated) {
@@ -51,7 +57,41 @@ const Login = () => {
       navigate('/dashboard');
     } catch (err) {
       console.error('Login error:', err);
-      setError('Connection error. Please try again.');
+      setError(t('auth.error.connection'));
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetMessage('');
+    setResetLoading(true);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail.trim() })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setResetMessage(data.error || 'Failed to send reset email');
+        setResetLoading(false);
+        return;
+      }
+
+      setResetMessage('Password reset link sent! Check your email.');
+      setResetLoading(false);
+      setTimeout(() => {
+        setShowForgotPassword(false);
+        setResetEmail('');
+        setResetMessage('');
+      }, 3000);
+    } catch (err) {
+      console.error('Forgot password error:', err);
+      setResetMessage('Connection error. Please try again.');
+      setResetLoading(false);
     }
   };
 
@@ -70,8 +110,8 @@ const Login = () => {
             </div>
           </div>
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-white tracking-tight">Welcome Back</h2>
-            <p className="text-blue-200/80 mt-2 text-sm font-medium">Smart Sanitation Platform</p>
+            <h2 className="text-3xl font-bold text-white tracking-tight">{t('auth.login.welcome')}</h2>
+            <p className="text-blue-200/80 mt-2 text-sm font-medium">{t('auth.login.subtitle')}</p>
           </div>
 
           {error && (
@@ -83,14 +123,14 @@ const Login = () => {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-xs font-bold text-blue-200 uppercase tracking-wider mb-2">Email Address</label>
+              <label className="block text-xs font-bold text-blue-200 uppercase tracking-wider mb-2">{t('auth.login.emailLabel')}</label>
               <div className="relative group">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50 group-focus-within:text-blue-400 transition-colors">
                   <User className="w-5 h-5" />
                 </span>
                 <input
                   type="email"
-                  placeholder="Enter your email address"
+                  placeholder={t('auth.login.emailPlaceholder')}
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   className="w-full pl-12 pr-4 py-3.5 bg-white/5 text-white placeholder-white/30 rounded-xl border border-white/10 focus:bg-white/10 focus:border-blue-400/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
@@ -100,14 +140,14 @@ const Login = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-blue-200 uppercase tracking-wider mb-2">Password</label>
+              <label className="block text-xs font-bold text-blue-200 uppercase tracking-wider mb-2">{t('auth.login.passwordLabel')}</label>
               <div className="relative group">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50 group-focus-within:text-blue-400 transition-colors">
                   <Lock className="w-5 h-5" />
                 </span>
                 <input
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="Enter password"
+                  placeholder={t('auth.login.passwordPlaceholder')}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   className="w-full pl-12 pr-12 py-3.5 bg-white/5 text-white placeholder-white/30 rounded-xl border border-white/10 focus:bg-white/10 focus:border-blue-400/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
@@ -125,20 +165,26 @@ const Login = () => {
             </div>
 
             <div className="flex items-center justify-end text-xs text-blue-200/60 pt-2">
-              <button type="button" className="hover:text-white transition-colors hover:underline">Forgot password?</button>
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="hover:text-white transition-colors hover:underline"
+              >
+                {t('auth.login.forgotPassword')}
+              </button>
             </div>
 
             <button
               type="submit"
               className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-600/30 hover:shadow-blue-600/40 hover:-translate-y-0.5"
             >
-              Sign In
+              {t('auth.login.submit')}
             </button>
           </form>
 
           <div className="text-sm text-blue-200/60 mt-6 text-center">
-            Don't have an account?{' '}
-            <Link to="/signup" className="text-white font-bold hover:underline">Create Account</Link>
+            {t('auth.login.noAccount')}{' '}
+            <Link to="/signup" className="text-white font-bold hover:underline">{t('auth.login.createAccount')}</Link>
           </div>
         </div>
 
@@ -146,6 +192,60 @@ const Login = () => {
           &copy; 2024 Smart Sanitation Management Platform
         </p>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 max-w-md w-full animate-in zoom-in-95 duration-300">
+            <h3 className="text-2xl font-bold text-white mb-2">Reset Password</h3>
+            <p className="text-blue-200/80 text-sm mb-6">Enter your email to receive a password reset link</p>
+
+            {resetMessage && (
+              <div className={`mb-4 text-sm px-4 py-3 rounded-xl border ${resetMessage.includes('sent')
+                  ? 'text-green-200 bg-green-500/20 border-green-500/30'
+                  : 'text-red-200 bg-red-500/20 border-red-500/30'
+                }`}>
+                {resetMessage}
+              </div>
+            )}
+
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-blue-200 uppercase tracking-wider mb-2">Email Address</label>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  className="w-full px-4 py-3.5 bg-white/5 text-white placeholder-white/30 rounded-xl border border-white/10 focus:bg-white/10 focus:border-blue-400/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setResetEmail('');
+                    setResetMessage('');
+                  }}
+                  className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all border border-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetLoading}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl transition-all shadow-lg disabled:opacity-50"
+                >
+                  {resetLoading ? 'Sending...' : 'Send Reset Link'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 

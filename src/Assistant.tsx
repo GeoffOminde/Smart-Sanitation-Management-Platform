@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocale } from './contexts/LocaleContext';
 import { apiFetch } from './lib/api';
 
 interface MessageItem {
@@ -9,13 +10,22 @@ interface MessageItem {
 import { Send, User, Bot } from 'lucide-react';
 
 const Assistant = () => {
+  const { t, locale, setLocale } = useLocale();
   const [messages, setMessages] = useState<MessageItem[]>([
-    { role: 'assistant', text: 'Hello! 👋 I can help with bookings, pricing, payments, or maintenance. How can I assist?' }
+    { role: 'assistant', text: t('assistant.welcome') }
   ]);
-  const [input, setInput] = useState('Hi! I want to book 3 units for Saturday in Westlands.');
-  const [locale, setLocale] = useState<'en' | 'sw'>('en');
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Generate a unique session ID for conversation context
+  const [sessionId] = useState(() => {
+    const stored = localStorage.getItem('assistantSessionId');
+    if (stored) return stored;
+    const newId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('assistantSessionId', newId);
+    return newId;
+  });
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
@@ -31,7 +41,11 @@ const Assistant = () => {
       const resp = await apiFetch('/api/assistant/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, locale })
+        body: JSON.stringify({
+          message: content,
+          locale,
+          sessionId  // Send sessionId for context tracking
+        })
       });
       if (!resp.ok) {
         let detail = '';
@@ -42,7 +56,7 @@ const Assistant = () => {
       const reply = data?.reply || '...';
       setMessages((m) => [...m, { role: 'assistant', text: reply }]);
     } catch (e: any) {
-      setMessages((m) => [...m, { role: 'assistant', text: e?.message || 'Sorry, something went wrong.' }]);
+      setMessages((m) => [...m, { role: 'assistant', text: e?.message || t('assistant.error') }]);
     } finally {
       setLoading(false);
     }
@@ -64,10 +78,10 @@ const Assistant = () => {
             <Bot className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="font-bold text-base leading-tight tracking-wide">Cortex Assistant</h1>
+            <h1 className="font-bold text-base leading-tight tracking-wide">{t('assistant.title')}</h1>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
-              <p className="text-[10px] text-blue-100 font-medium uppercase tracking-wider opacity-90">Live Support</p>
+              <p className="text-[10px] text-blue-100 font-medium uppercase tracking-wider opacity-90">{t('assistant.live')}</p>
             </div>
           </div>
         </div>
@@ -94,7 +108,7 @@ const Assistant = () => {
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white ${isUser ? 'bg-gradient-to-br from-indigo-100 to-blue-50' : 'bg-gradient-to-br from-blue-600 to-indigo-600'}`}>
                   {isUser ? <User className="w-4 h-4 text-indigo-600" /> : <Bot className="w-4 h-4 text-white" />}
                 </div>
-                <div className={`px-4 py-3 rounded-2xl shadow-sm text-sm leading-relaxed border ${isUser
+                <div className={`px-4 py-3 rounded-2xl shadow-sm text-sm leading-relaxed border whitespace-pre-wrap ${isUser
                   ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-br-none border-transparent'
                   : 'bg-white text-gray-800 border-gray-100 rounded-bl-none shadow-md shadow-gray-100/50'
                   }`}>
@@ -127,7 +141,7 @@ const Assistant = () => {
         <div className="relative flex items-center group">
           <input
             className="w-full pl-5 pr-14 py-3.5 bg-gray-50 text-gray-900 placeholder-gray-400 rounded-2xl border border-gray-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-sm outline-none shadow-inner"
-            placeholder={locale === 'en' ? "Ask Cortex AI..." : "Uliza Cortex AI..."}
+            placeholder={t('assistant.placeholder')}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
@@ -144,7 +158,7 @@ const Assistant = () => {
           </button>
         </div>
         <p className="text-[10px] text-center text-gray-400 mt-3 font-medium">
-          Powered by Smart Sanitation Cognitive Engine
+          {t('assistant.footer')}
         </p>
       </div>
     </div>
