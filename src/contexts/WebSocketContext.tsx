@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useUnits } from './UnitContext';
-import { Unit } from '../../types';
+import { Unit } from '../types';
 import { API_BASE } from '../lib/api';
 
 type WebSocketMessage = {
