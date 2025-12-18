@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useRef, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useUnits } from './UnitContext';
 import { Unit } from '../../types';
+import { API_BASE } from '../lib/api';
 
 type WebSocketMessage = {
   type: 'UNIT_UPDATE' | 'STATUS_CHANGE' | 'NEW_BOOKING';
@@ -13,7 +14,7 @@ type WebSocketContextType = {
 };
 
 const WebSocketContext = createContext<WebSocketContextType>({
-  sendMessage: () => {},
+  sendMessage: () => { },
   isConnected: false,
 });
 
@@ -26,9 +27,10 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
   const reconnectInterval = 3000; // 3 seconds
 
   const connect = useCallback(() => {
-    // In production, replace with your WebSocket server URL
-    const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:3001';
-    
+    // Dynamic WebSocket URL based on API_BASE
+    const baseUrl = API_BASE || window.location.origin;
+    const wsUrl = baseUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+
     try {
       ws.current = new WebSocket(wsUrl);
 
@@ -41,7 +43,7 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
       ws.current.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
-          
+
           switch (message.type) {
             case 'UNIT_UPDATE':
               updateUnit(message.payload.id, message.payload.updates);
@@ -75,7 +77,7 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
     if (reconnectAttempts.current < maxReconnectAttempts) {
       reconnectAttempts.current++;
       console.log(`Attempting to reconnect (${reconnectAttempts.current}/${maxReconnectAttempts})...`);
-      
+
       setTimeout(() => {
         connect();
       }, reconnectInterval);
@@ -105,10 +107,10 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   return (
-    <WebSocketContext.Provider 
-      value={{ 
-        sendMessage, 
-        isConnected: isConnected.current 
+    <WebSocketContext.Provider
+      value={{
+        sendMessage,
+        isConnected: isConnected.current
       }}
     >
       {children}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from './AuthContext';
+import { apiFetch } from './lib/api';
 import { useLocale } from './contexts/LocaleContext';
 import { Lock, User, Eye, EyeOff } from 'lucide-react';
 import { trackNow } from './lib/analytics';
@@ -30,22 +31,20 @@ const Login = () => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/login', {
+      const response = await apiFetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        data: {
           email: username.trim(),
           password: password
-        })
+        }
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const data = await response.json();
         setError(data.error || 'Invalid credentials');
         return;
       }
-
-      const data = await response.json();
 
       // Store token
       if (data.token) {
@@ -67,10 +66,9 @@ const Login = () => {
     setResetLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/forgot-password', {
+      const response = await apiFetch('/api/auth/forgot-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetEmail.trim() })
+        data: { email: resetEmail.trim() }
       });
 
       const data = await response.json();
@@ -202,8 +200,8 @@ const Login = () => {
 
             {resetMessage && (
               <div className={`mb-4 text-sm px-4 py-3 rounded-xl border ${resetMessage.includes('sent')
-                  ? 'text-green-200 bg-green-500/20 border-green-500/30'
-                  : 'text-red-200 bg-red-500/20 border-red-500/30'
+                ? 'text-green-200 bg-green-500/20 border-green-500/30'
+                : 'text-red-200 bg-red-500/20 border-red-500/30'
                 }`}>
                 {resetMessage}
               </div>

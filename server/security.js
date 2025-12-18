@@ -89,6 +89,9 @@ const getCorsOptions = () => {
             if (process.env.NODE_ENV === 'production') {
                 if (allowedOrigins.includes(origin)) {
                     callback(null, true);
+                } else if (origin.endsWith('.vercel.app')) {
+                    // Allow all Vercel preview/production domains
+                    callback(null, true);
                 } else {
                     logger.warn('CORS blocked request from origin:', origin);
                     callback(new Error('Not allowed by CORS'));
