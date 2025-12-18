@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  password         String
+  name             String
+  role             String
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+
+model Transaction {
+  id        String   @id @default(uuid())
+  provider  String
+  email     String?
+  phone     String?
+  amount    Float
+  status    String   @default("pending")
+  metadata  String?
+  raw       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Booking {
+  id            String   @id @default(uuid())
+  customer      String
+  unit          String
+  date          DateTime
+  duration      String
+  amount        Float
+  status        String
+  paymentStatus String   @default("pending")
+  technicianId  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Unit {
+  id             String   @id @default(uuid())
+  serialNo       String   @unique
+  type           String   @default("Standard Portable") // Standard Portable, Deluxe Portable, Wheelchair Accessible
+  location       String
+  fillLevel      Int
+  batteryLevel   Int
+  status         String
+  lastSeen       DateTime @default(now())
+  coordinates    String?
+  // IoT Sensor Data
+  temperature    Float?   // Temperature in Celsius
+  humidity       Float?   // Humidity percentage
+  odorLevel      Int?     // Odor level 0-100
+  usageCount     Int      @default(0) // Number of uses
+  lastServiceDate DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  maintenanceLogs MaintenanceLog[]
+}
+
+
+model MaintenanceLog {
+  id            String    @id @default(uuid())
+  unitId        String
+  unit          Unit      @relation(fields: [unitId], references: [id])
+  type          String
+  description   String
+  scheduledDate DateTime
+  completedDate DateTime?
+  technicianId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model NotificationLog {
+  id        String   @id @default(uuid())
+  channel   String   // e.g., 'whatsapp', 'email'
+  recipient String
+  message   String
+  status    String   // 'sent', 'failed', 'delivered'
+  createdAt DateTime @default(now())
+}
+
+model Route {
+  id            String   @id @default(uuid())
+  technician    String
+  technicianId  String?
+  units         Int
+  status        String
+  estimatedTime String
+  priority      String
+  unitId        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  name      String
+  role      String
+  email     String   @unique
+  phone     String
+  status    String
+  joinDate  DateTime
+  lastLat   Float?
+  lastLng   Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Plan {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  price       String
+  period      String
+  features    String   // JSON string of string[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AnalyticsDaily {
+  id            String   @id @default(uuid())
+  date          DateTime @unique
+  revenue       Float    @default(0)
+  pickups       Int      @default(0)
+  distance      Float    @default(0)
+  fuelCost      Float    @default(0)
+  activeUnits   Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Settings {
+  id                    String   @id @default(uuid())
+  userId                String   // Link to user
+  companyName           String
+  contactEmail          String
+  phone                 String
+  language              String   @default("en")
+  sessionTimeout        String   @default("30")
+  emailNotifications    Boolean  @default(true)
+  whatsappNotifications Boolean  @default(true)
+  theme                 String   @default("light")
+  currency              String   @default("KES")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
