@@ -48,4 +48,12 @@ if (process.env.NODE_ENV !== 'production') {
     }));
 }
 
+// Create a stream object with a 'write' function that will be used by `morgan`
+logger.stream = {
+    write: function (message, encoding) {
+        // Use the 'info' log level so the output will be picked up by both transports (file and console)
+        logger.info(message.trim());
+    },
+};
+
 module.exports = logger;
