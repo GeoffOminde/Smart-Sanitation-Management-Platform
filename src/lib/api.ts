@@ -56,9 +56,26 @@ export async function apiFetch(input: string, options: FetchOptions = {}): Promi
   const body = data ? JSON.stringify(data) : init.body;
 
   // 4. Execute the fetch request
-  return fetch(url, {
+  const response = await fetch(url, {
     ...init,
     headers: finalHeaders,
     body: body,
   });
+
+  // 5. Handle 401 Unauthorized - Session expired
+  if (response.status === 401) {
+    // Clear the expired token
+    localStorage.removeItem('authToken');
+
+    // Show user-friendly message
+    alert('Your session has expired. Please log in again.');
+
+    // Redirect to login page
+    window.location.href = '/';
+
+    // Throw error to prevent further processing
+    throw new Error('Session expired');
+  }
+
+  return response;
 }
