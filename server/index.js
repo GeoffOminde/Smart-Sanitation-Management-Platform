@@ -84,6 +84,46 @@ app.get('/health/ready', readinessCheck);
 app.get('/health/live', livenessCheck);
 app.get('/health/metrics', metrics);
 
+// Database diagnostic endpoint
+app.get('/api/health/db', async (req, res) => {
+  try {
+    const dbUrl = process.env.DATABASE_URL;
+    const isSet = !!dbUrl;
+    const maskedUrl = isSet ? dbUrl.replace(/:[^:@]*@/, ':****@') : 'not set';
+
+    console.log('Diagnosing DB connection...');
+    console.log('DATABASE_URL set:', isSet);
+    console.log('Masked URL:', maskedUrl);
+
+    // Attempt raw query
+    const startTime = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    const duration = Date.now() - startTime;
+
+    res.json({
+      status: 'connected',
+      latency: `${duration}ms`,
+      config: {
+        url_set: isSet,
+        url_masked: maskedUrl
+      }
+    });
+  } catch (error) {
+    console.error('DB Diagnosis failed:', error);
+    res.status(500).json({
+      status: 'disconnected',
+      error: error.message,
+      code: error.code,
+      meta: error.meta,
+      config: {
+        url_set: !!process.env.DATABASE_URL,
+        // Safe to show protocol and host if possible
+        protocol: process.env.DATABASE_URL?.split(':')[0]
+      }
+    });
+  }
+});
+
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 const AI = require('./ai');
 const Forecast = require('./forecast');
