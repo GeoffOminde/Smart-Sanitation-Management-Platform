@@ -457,7 +457,7 @@ For support: ${settings.contactEmail}
     contactEmail: 'admin@smartsanitation.co.ke',
     phone: '+254 700 000 000',
     language: 'en',
-    sessionTimeout: '30',
+    sessionTimeout: '120', // Default 120 minutes (2 hours)
     emailNotifications: true,
     whatsappNotifications: true,
     theme: 'light',
@@ -506,37 +506,53 @@ For support: ${settings.contactEmail}
 
   // Session timeout implementation
   const [lastActivity, setLastActivity] = useState(Date.now());
+  const [sessionWarningShown, setSessionWarningShown] = useState(false);
 
   useEffect(() => {
-    const handleActivity = () => setLastActivity(Date.now());
+    const handleActivity = () => {
+      setLastActivity(Date.now());
+      setSessionWarningShown(false); // Reset warning when user is active
+    };
 
     // Track user activity
     window.addEventListener('mousemove', handleActivity);
     window.addEventListener('keypress', handleActivity);
     window.addEventListener('click', handleActivity);
     window.addEventListener('scroll', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
 
-    // Check for session timeout
+    // Check for session timeout - check every 5 minutes instead of every minute
     const timeoutInterval = setInterval(() => {
-      const timeoutMinutes = parseInt(settings.sessionTimeout) || 30;
+      const timeoutMinutes = parseInt(settings.sessionTimeout) || 120;
       const timeoutMs = timeoutMinutes * 60 * 1000;
       const timeSinceActivity = Date.now() - lastActivity;
 
+      // Warning at 80% of timeout
+      const warningThreshold = timeoutMs * 0.8;
+
       if (timeSinceActivity > timeoutMs) {
+        // Session expired
         alert(`Session expired after ${timeoutMinutes} minutes of inactivity. Please log in again.`);
         // In a real app, you would redirect to login
+        localStorage.removeItem('authToken');
         window.location.reload();
+      } else if (timeSinceActivity > warningThreshold && !sessionWarningShown) {
+        // Show warning
+        const remainingMinutes = Math.ceil((timeoutMs - timeSinceActivity) / 60000);
+        console.warn(`Session will expire in ${remainingMinutes} minutes due to inactivity.`);
+        setSessionWarningShown(true);
       }
-    }, 60000); // Check every minute
+    }, 5 * 60 * 1000); // Check every 5 minutes
 
     return () => {
       window.removeEventListener('mousemove', handleActivity);
       window.removeEventListener('keypress', handleActivity);
       window.removeEventListener('click', handleActivity);
       window.removeEventListener('scroll', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
       clearInterval(timeoutInterval);
     };
-  }, [settings.sessionTimeout, lastActivity]);
+  }, [settings.sessionTimeout, lastActivity, sessionWarningShown]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
