@@ -1229,13 +1229,29 @@ app.delete('/api/maintenance/:id', authMiddleware, async (req, res) => {
 app.get('/api/units', async (req, res) => {
   try {
     const units = await prisma.unit.findMany();
-    // Convert 'coordinates' string "[lat,lon]" back to array if needed, or frontend handles it?
-    // Frontend expects [number, number]. Prisma stores String?.
-    // Let's parse it here.
-    const formatted = units.map(u => ({
-      ...u,
-      coordinates: u.coordinates ? JSON.parse(u.coordinates) : [-1.2921, 36.8219]
-    }));
+    // Convert 'coordinates' string to array
+    // Handle both formats: "-1.2921,36.8219" or "[-1.2921,36.8219]"
+    const formatted = units.map(u => {
+      let coords = [-1.2921, 36.8219]; // Default Nairobi coordinates
+
+      if (u.coordinates) {
+        try {
+          // Try parsing as JSON first
+          coords = JSON.parse(u.coordinates);
+        } catch (e) {
+          // If not JSON, try splitting comma-separated string
+          const parts = u.coordinates.split(',').map(s => parseFloat(s.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            coords = parts;
+          }
+        }
+      }
+
+      return {
+        ...u,
+        coordinates: coords
+      };
+    });
     res.json(formatted);
   } catch (err) {
     console.error('Error fetching units', err);
